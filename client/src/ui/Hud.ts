@@ -152,8 +152,6 @@ export class Hud {
         <div class="g">GEAR <b>1</b></div>
         <div class="hud-rpm"><div></div></div>
       </div></div>`;
-    this.fit();
-    addEventListener('resize', () => this.fit());
     this.speed = root.querySelector('.hud-speed .v')!;
     this.gear = root.querySelector('.hud-speed .g b')!;
     this.rpm = root.querySelector('.hud-rpm > div')!;
@@ -202,6 +200,8 @@ export class Hud {
     this.incoming = root.querySelector('.hud-incoming')!;
     this.feedEl = root.querySelector('.hud-feed')!;
     this.setSlots([], 0);
+    this.fit();
+    addEventListener('resize', () => this.fit());
   }
 
   toggleHelp() {
@@ -430,6 +430,8 @@ export class Hud {
   private fit() {
     this.scale = clamp(Math.min(innerWidth / 1920, innerHeight / 1080), 0.5, 1);
     this.root.style.setProperty('--ui', String(this.scale));
+    // the menu keeps its size (it scrolls when the window is short)
+    this.results.style.zoom = String(1 / this.scale);
   }
 
   update(dt: number, v: Vehicle, quality: Quality, trackName: string, drawCalls: number, scale = 1, autoRes = true) {
