@@ -119,3 +119,26 @@ export function saveDifficulty(d: AIDifficulty) {
     /* storage blocked */
   }
 }
+
+const CAR_KEY = 'xalxe.car';
+
+/** the player's car id (?car= in the address wins) */
+export function loadCar(valid: string[], fallback: string): string {
+  const url = new URLSearchParams(location.search).get('car');
+  if (url && valid.includes(url)) return url;
+  try {
+    const v = localStorage.getItem(CAR_KEY);
+    if (v && valid.includes(v)) return v;
+  } catch {
+    /* storage blocked */
+  }
+  return fallback;
+}
+
+export function saveCar(id: string) {
+  try {
+    localStorage.setItem(CAR_KEY, id);
+  } catch {
+    /* storage blocked */
+  }
+}

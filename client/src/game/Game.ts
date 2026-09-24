@@ -9,12 +9,12 @@ import { Vehicle, emptyInput, type DriveInput } from '@shared/physics/vehicle';
 import { AIDriver } from '@shared/ai/driver';
 import { Race, gridSlot } from '@shared/race/race';
 import { Combat, POWERS, type CombatEvent } from '@shared/race/powerups';
-import { CARS, DEFAULT_CAR } from '@shared/cars';
+import { CARS, CAR_IDS, DEFAULT_CAR } from '@shared/cars';
 import { clamp, rng } from '@shared/math';
 import { Assets } from '../core/Assets';
 import { Input } from '../core/Input';
 import {
-  PRESETS, loadQuality, saveQuality, loadAutoRes, saveAutoRes, loadDifficulty, saveDifficulty,
+  PRESETS, loadQuality, saveQuality, loadAutoRes, saveAutoRes, loadDifficulty, saveDifficulty, loadCar, saveCar,
   type Quality, type AIDifficulty,
 } from '../core/Settings';
 import { Pipeline } from '../render/Pipeline';
@@ -27,7 +27,7 @@ import { buildProps, updateTreeLod, type TreeCell } from '../world/Props';
 import { CarView } from '../vehicle/CarView';
 import { makeShopSignAtlas } from '../world/banners';
 import { ChaseCamera } from '../vehicle/ChaseCamera';
-import { Hud, type ResultRow } from '../ui/Hud';
+import { Hud, type ResultRow, type PanelInfo } from '../ui/Hud';
 import { Minimap, type MapBlip } from '../ui/Minimap';
 import { Effects } from '../fx/Effects';
 import { CombatView } from '../fx/CombatView';
@@ -39,13 +39,13 @@ const HOLD = emptyInput();
 
 /** the other drivers (names are made up; colours = paint + a readable mini map colour) */
 const ROSTER: RacerInfo[] = [
-  { name: 'KADE', paint: 0xf0b400, mapColor: '#ffc21a' },
-  { name: 'MIRA', paint: 0x0b3d91, mapColor: '#4a86ff' },
-  { name: 'JUNO', paint: 0xe8e8e8, mapColor: '#f2f2f2' },
-  { name: 'REX', paint: 0x101010, mapColor: '#9aa0a8' },
-  { name: 'NOVA', paint: 0x0d6b3a, mapColor: '#2bd66f' },
-  { name: 'VEX', paint: 0xff5a00, mapColor: '#ff7a1f' },
-  { name: 'LINA', paint: 0x4b1d8f, mapColor: '#b070ff' },
+  { name: 'KADE', car: 'ferrano458', paint: 0xf0b400, mapColor: '#ffc21a' },
+  { name: 'MIRA', car: 'kestrel', paint: 0x0b3d91, mapColor: '#4a86ff' },
+  { name: 'JUNO', car: 'ferrano458', paint: 0xe8e8e8, mapColor: '#f2f2f2' },
+  { name: 'REX', car: 'kestrel', paint: 0x101010, mapColor: '#9aa0a8' },
+  { name: 'NOVA', car: 'kestrel', paint: 0x0d6b3a, mapColor: '#2bd66f' },
+  { name: 'VEX', car: 'ferrano458', paint: 0xff5a00, mapColor: '#ff7a1f' },
+  { name: 'LINA', car: 'kestrel', paint: 0x4b1d8f, mapColor: '#b070ff' },
 ];
 
 /** forward direction (XZ) of a car from its rotation */
@@ -86,6 +86,10 @@ export class Game {
   private fullToast = 0;
   private startLights: THREE.MeshStandardMaterial[] = [];
   private difficulty: AIDifficulty = loadDifficulty();
+  /** the player's chosen car (applies at the next race start) */
+  private carId = loadCar(CAR_IDS, DEFAULT_CAR);
+  private paused = false;
+  private restarting = false;
   private chase = new ChaseCamera(this.camera);
   private env!: Environment;
   private hud: Hud;
@@ -116,8 +120,15 @@ export class Game {
     this.hud.onDifficulty = (d) => {
       this.difficulty = d as AIDifficulty;
       saveDifficulty(this.difficulty);
-      this.showResults();
+      this.refreshPanel();
     };
+    this.hud.onCar = (id) => {
+      if (!CARS[id]) return;
+      this.carId = id;
+      saveCar(id);
+      this.refreshPanel();
+    };
+    this.hud.onResume = () => this.setPaused(false);
     if (this.shotMode) document.body.classList.add('shot');
     (window as unknown as { __game: Game }).__game = this;
   }
@@ -236,7 +247,6 @@ export class Game {
 
   /** player + AI cars on the grid (or the player alone in free mode) */
   private async createRacers() {
-    const spec = CARS[DEFAULT_CAR];
     const nAI = this.raceMode ? clamp(Math.round(Number(this.params.get('ai') ?? 7)), 0, ROSTER.length) : 0;
     const count = nAI + 1;
     const laps = this.raceMode ? clamp(Math.round(Number(this.params.get('laps') ?? 3)), 1, 20) : Infinity;
@@ -251,9 +261,10 @@ export class Game {
     };
 
     const night = this.def.theme !== 'day';
+    const pspec = CARS[this.carId];
     const [playerView, ...aiViews] = await Promise.all([
-      new CarView(spec).load(this.assets, spec.paint, night),
-      ...ROSTER.slice(0, nAI).map((info) => new CarView(spec).load(this.assets, info.paint, false, true)),
+      new CarView(pspec).load(this.assets, pspec.paint, night),
+      ...ROSTER.slice(0, nAI).map((info) => new CarView(CARS[info.car]).load(this.assets, info.paint, false, true)),
     ]);
     // the player starts mid-pack
     const playerSlot = Math.min(4, count - 1);
@@ -264,9 +275,9 @@ export class Game {
       const sp = this.raceMode
         ? spawnAt(this.cl, slot.s, slot.lateral)
         : spawnAt(this.cl, Number(this.params.get('s') ?? -18), Number(this.params.get('lat') ?? 3.6));
-      const vehicle = new Vehicle(this.world, spec, sp.pos, sp.yaw);
+      const info: RacerInfo = isPlayer ? { name: 'YOU', car: this.carId, paint: pspec.paint, mapColor: '#e8202a' } : ROSTER[ai];
+      const vehicle = new Vehicle(this.world, CARS[info.car], sp.pos, sp.yaw);
       const view = isPlayer ? playerView : aiViews[ai];
-      const info = isPlayer ? { name: 'YOU', paint: spec.paint, mapColor: '#e8202a' } : ROSTER[ai];
       const driver = isPlayer ? null : new AIDriver(this.cl, this.line, this.def.roadWidth, this.difficulty, 101 + ai);
       if (!isPlayer) ai++;
       const racer = new Racer(this.racers.length, info, vehicle, view, driver, isPlayer, g);
@@ -278,7 +289,7 @@ export class Game {
     this.playerAI = new AIDriver(this.cl, this.line, this.def.roadWidth, 'medium', 99);
     this.setReactions();
     this.vehicles = this.racers.map((rc) => rc.vehicle);
-    this.combat = new Combat(this.cl, this.def.roadWidth, this.corners, count, spec.maxHealth);
+    this.combat = new Combat(this.cl, this.def.roadWidth, this.corners, this.racers.map((rc) => rc.vehicle.spec.maxHealth));
   }
 
   private setReactions() {
@@ -464,7 +475,16 @@ export class Game {
     if (inp.wasPressed('KeyE') && this.race.started && !plDone) this.usePower();
     if (inp.wasPressed('KeyQ')) this.combat.cycle(this.player.index);
     const enter = inp.wasPressed('Enter') || inp.wasPressed('NumpadEnter');
-    if (enter && this.resultsUp()) this.restartRace();
+    const padStart = inp.wasPressed('PadStart');
+    if ((enter || (padStart && !this.paused)) && (this.resultsUp() || this.paused)) this.restartRace();
+    else if ((inp.wasPressed('Escape') || padStart) && this.raceMode && !this.resultsUp()) this.setPaused(!this.paused);
+    if (this.paused) {
+      if (render) {
+        this.pipeline.render(dt, 0);
+        this.hud.update(dt, this.player.vehicle, this.quality, this.def.name, this.pipeline.renderer.info.render.calls, this.pipeline.scale, this.autoRes);
+      }
+      return;
+    }
     const drive = this.autopilot ? this.autopilotInput() : this.shotMode ? emptyInput() : inp.drive;
 
     // fixed-step physics with render interpolation
@@ -693,6 +713,16 @@ export class Game {
     }
   }
 
+  private panelBase(): Omit<PanelInfo, 'mode'> {
+    const changed = this.carId !== this.player.vehicle.spec.id;
+    return {
+      difficulty: this.difficulty,
+      car: this.carId,
+      cars: CAR_IDS.map((id) => ({ id, name: CARS[id].name.toUpperCase(), stats: CARS[id].stats })),
+      carNote: changed ? `${CARS[this.carId].name.toUpperCase()} — READY FOR THE NEXT RACE` : undefined,
+    };
+  }
+
   private showResults() {
     const race = this.race;
     const rows: ResultRow[] = race.standings().map((i) => {
@@ -700,10 +730,53 @@ export class Game {
       const rc = this.racers[i];
       return { name: rc.info.name, color: rc.info.mapColor, isPlayer: rc.isPlayer, time: r.finished ? r.finishTime : null, best: r.bestLap, kills: this.combat.cars[i].stats.kills };
     });
-    this.hud.setResults(rows, this.difficulty, race.finishOrder.indexOf(this.player.index) + 1);
+    this.hud.setPanel({ ...this.panelBase(), mode: 'results', rows, place: race.finishOrder.indexOf(this.player.index) + 1 });
   }
 
-  private restartRace() {
+  private refreshPanel() {
+    if (this.paused) this.hud.setPanel({ ...this.panelBase(), mode: 'pause' });
+    else if (this.resultsUp()) this.showResults();
+  }
+
+  private setPaused(on: boolean) {
+    this.paused = on;
+    if (on) this.hud.setPanel({ ...this.panelBase(), mode: 'pause' });
+    else this.hud.setPanel(null);
+    this.last = performance.now();
+  }
+
+  /** put the player in a different car (between races) */
+  private async swapPlayerCar(id: string) {
+    const pl = this.player;
+    const spec = CARS[id];
+    const view = await new CarView(spec).load(this.assets, spec.paint, this.def.theme !== 'day');
+    pl.view.dispose();
+    this.world.removeRigidBody(pl.vehicle.body);
+    const slot = gridSlot(pl.gridSlot);
+    const sp = spawnAt(this.cl, slot.s, slot.lateral);
+    pl.vehicle = new Vehicle(this.world, spec, sp.pos, sp.yaw);
+    pl.view = view;
+    pl.info = { ...pl.info, car: id, paint: spec.paint };
+    this.vehicles[pl.index] = pl.vehicle;
+    this.combat.cars[pl.index].maxHealth = spec.maxHealth;
+    this.scene.add(view.root);
+    this.pipeline.motionBlur.cars.length = 0;
+    this.trackBlur();
+    this.player.view.setEnvMap(this.reflections ? this.reflections.texture : null);
+    await this.pipeline.renderer.compileAsync(this.scene, this.camera);
+  }
+
+  private async restartRace() {
+    if (this.restarting) return;
+    this.restarting = true;
+    this.paused = false;
+    if (this.carId !== this.player.vehicle.spec.id) {
+      this.hud.setPanel(null);
+      this.hud.toast('LOADING CAR…', 3);
+      await this.swapPlayerCar(this.carId);
+      this.hud.toast(CARS[this.carId].name.toUpperCase(), 1.5);
+    }
+    this.restarting = false;
     const race = this.race;
     race.restart();
     for (const rc of this.racers) {
@@ -720,7 +793,7 @@ export class Game {
     this.wrongWay = 0;
     this.lampState = '';
     this.acc = 0;
-    this.hud.setResults(null);
+    this.hud.setPanel(null);
     this.combat.reset();
     this.combatView.clear();
     for (const rc of this.racers) rc.view.setPaint(rc.info.paint);

@@ -34,6 +34,16 @@ export interface ResultRow extends StandingRow {
   kills: number;
 }
 
+export interface PanelInfo {
+  mode: 'results' | 'pause';
+  rows?: ResultRow[];
+  place?: number;
+  difficulty: string;
+  car: string;
+  cars: { id: string; name: string; stats: { speed: number; acceleration: number; handling: number; health: number } }[];
+  carNote?: string;
+}
+
 export const fmtTime = (t: number) => {
   const m = Math.floor(t / 60), s = t - m * 60;
   return `${m}:${s.toFixed(2).padStart(5, '0')}`;
@@ -64,7 +74,9 @@ export class Hud {
   private banner: HTMLElement;
   /** results screen buttons */
   onRestart: (() => void) | null = null;
+  onResume: (() => void) | null = null;
   onDifficulty: ((d: string) => void) | null = null;
+  onCar: ((id: string) => void) | null = null;
   readonly mapSlot: HTMLElement;
   readonly slotsEl: HTMLElement;
   private healthFill: HTMLElement;
@@ -90,7 +102,7 @@ export class Hud {
         <div><kbd>W</kbd><kbd>S</kbd> throttle / brake-reverse &nbsp; <kbd>A</kbd><kbd>D</kbd> steer</div>
         <div><kbd>Space</kbd> handbrake → drift (hold throttle to keep it) &nbsp; <kbd>R</kbd> reset</div>
         <div><kbd>E</kbd> use power-up &nbsp; <kbd>Q</kbd> next power-up &nbsp; <kbd>C</kbd> camera</div>
-        <div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> graphics &nbsp; <kbd>F</kbd> auto-res &nbsp; <kbd>H</kbd> help</div>
+        <div><kbd>Esc</kbd> pause / change car &nbsp; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> graphics &nbsp; <kbd>F</kbd> auto-res &nbsp; <kbd>H</kbd> help</div>
       </div>
       <div class="hud-turn"><div class="arrow"></div><div class="txt"><div class="t1"></div><div class="t2"></div></div></div>
       <div class="hud-race">
@@ -136,7 +148,9 @@ export class Hud {
       const t = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
       if (!t) return;
       if (t.dataset.act === 'restart') this.onRestart?.();
+      else if (t.dataset.act === 'resume') this.onResume?.();
       else if (t.dataset.act === 'diff') this.onDifficulty?.(t.dataset.v!);
+      else if (t.dataset.act === 'car') this.onCar?.(t.dataset.v!);
     });
     this.setRace(null);
     this.banner = root.querySelector('.hud-banner')!;
@@ -202,13 +216,18 @@ export class Hud {
   }
 
   /** end-of-race table; null hides it. Updates live while the others finish. */
-  setResults(rows: ResultRow[] | null, difficulty = 'medium', playerPlace = 0) {
-    if (!rows) {
+  /**
+   * Results / pause panel; null hides it. Results update live while the others finish.
+   * Car changes apply to the next race.
+   */
+  setPanel(p: PanelInfo | null) {
+    if (!p) {
       this.results.classList.remove('show');
       // a focused (now hidden) button would still react to Space/Enter
       (document.activeElement as HTMLElement | null)?.blur?.();
       return;
     }
+    const rows = p.rows ?? [];
     const leader = rows[0]?.time ?? null;
     const body = rows
       .map((r, i) => {
@@ -217,14 +236,26 @@ export class Hud {
       })
       .join('');
     const diffs = ['easy', 'medium', 'hard']
-      .map((d) => `<button data-act="diff" data-v="${d}" class="${d === difficulty ? 'on' : ''}">${d.toUpperCase()}</button>`)
+      .map((d) => `<button data-act="diff" data-v="${d}" class="${d === p.difficulty ? 'on' : ''}">${d.toUpperCase()}</button>`)
       .join('');
+    const cars = p.cars
+      .map((c) => `<button data-act="car" data-v="${c.id}" class="car${c.id === p.car ? ' on' : ''}">${c.name}<small>SPD ${c.stats.speed} · ACC ${c.stats.acceleration} · HDL ${c.stats.handling} · HP ${c.stats.health}</small></button>`)
+      .join('');
+    const title = p.mode === 'pause' ? 'PAUSED' : `${p.place}<span>${ordinal(p.place ?? 0)}</span> PLACE`;
+    const table = rows.length
+      ? `<table><tr class="h"><td></td><td>DRIVER</td><td class="t">TIME</td><td class="t">BEST LAP</td><td class="t">WRECKED</td></tr>${body}</table>`
+      : '';
+    const buttons = p.mode === 'pause'
+      ? `<div class="row2"><button class="go alt" data-act="resume">RESUME <small>ESC</small></button><button class="go" data-act="restart">RESTART <small>ENTER</small></button></div>`
+      : `<button class="go" data-act="restart">RACE AGAIN <small>ENTER</small></button>`;
     const html = `
       <div class="panel">
-        <div class="title">${playerPlace}<span>${ordinal(playerPlace)}</span> PLACE</div>
-        <table><tr class="h"><td></td><td>DRIVER</td><td class="t">TIME</td><td class="t">BEST LAP</td><td class="t">WRECKED</td></tr>${body}</table>
+        <div class="title">${title}</div>
+        ${table}
         <div class="opts"><span>AI</span>${diffs}</div>
-        <button class="go" data-act="restart">RACE AGAIN <small>ENTER</small></button>
+        <div class="opts cars"><span>CAR</span>${cars}</div>
+        ${p.carNote ? `<div class="note">${p.carNote}</div>` : ''}
+        ${buttons}
       </div>`;
     if (this.resultsKey !== html) {
       this.resultsKey = html;

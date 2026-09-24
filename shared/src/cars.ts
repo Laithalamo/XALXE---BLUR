@@ -82,6 +82,42 @@ export const CARS: Record<string, CarSpec> = {
       driven: 'rear',
     },
   },
+  kestrel: {
+    id: 'kestrel',
+    name: 'Kestrel C',
+    model: 'models/cars/kestrel_c.glb',
+    lodModels: ['models/cars/kestrel_c_lod.glb', 'models/cars/kestrel_c_lod2.glb'],
+    unlockLevel: 1,
+    stats: { speed: 7, acceleration: 9, handling: 8, health: 7 },
+    maxHealth: 115,
+    paint: 0x1f5fd6,
+    // all-wheel drive concept: quicker off the line and more grip, a little less top speed
+    wheels: [
+      { x: -0.976, y: 0.384, z: -1.485, radius: 0.384, width: 0.28, front: true },
+      { x: 0.976, y: 0.384, z: -1.485, radius: 0.384, width: 0.28, front: true },
+      { x: -0.9825, y: 0.384, z: 1.314, radius: 0.384, width: 0.28, front: false },
+      { x: 0.9825, y: 0.384, z: 1.314, radius: 0.384, width: 0.28, front: false },
+    ],
+    physics: {
+      mass: 1560,
+      com: [0, 0.44, 0.02],
+      box: { hx: 1.02, hy: 0.33, hz: 2.15, cy: 0.62, cz: -0.24 },
+      enginePower: 405000,
+      maxDriveForce: 16000,
+      topSpeed: 85,
+      brakeForce: 23500,
+      maxSteer: 0.58,
+      highSpeedSteer: 0.12,
+      grip: 1.62,
+      rearGripBias: 0.98,
+      driftGrip: 0.24,
+      suspension: { rest: 0.32, stiffness: 56000, damping: 5500, travel: 0.22 },
+      antiRoll: 18000,
+      downforce: 1.8,
+      driven: 'all',
+    },
+  },
 };
 
 export const DEFAULT_CAR = 'ferrano458';
+export const CAR_IDS = Object.keys(CARS);

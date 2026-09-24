@@ -55,7 +55,7 @@ export class Input {
       this.padNext = next;
       // Start: menu / race again (edge-triggered: held buttons don't repeat)
       const start = !!pad.buttons[9]?.pressed;
-      if (start && !this.padStart) { this.pressed.add('Escape'); this.pressed.add('Enter'); }
+      if (start && !this.padStart) this.pressed.add('PadStart');
       this.padStart = start;
     }
 

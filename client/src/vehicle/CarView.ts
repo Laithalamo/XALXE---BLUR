@@ -87,6 +87,8 @@ function makeMaterials(paintColor: number, flakes: THREE.Texture): Record<string
     dark: new THREE.MeshStandardMaterial({ color: 0x151517, roughness: 0.6, metalness: 0.2 }),
     wheel: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.6 }),
     rest: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.4 }),
+    signal: new THREE.MeshPhysicalMaterial({ color: 0x5a3000, emissive: 0xff8a00, emissiveIntensity: 0.15, roughness: 0.15, clearcoat: 1 }),
+    caliper: new THREE.MeshStandardMaterial({ color: 0x8a0f12, metalness: 0.4, roughness: 0.4 }),
     interior_dark: new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.75 }),
     interior_mid: new THREE.MeshStandardMaterial({ color: 0x3b3c3e, roughness: 0.5, metalness: 0.4 }),
     leather: new THREE.MeshStandardMaterial({ color: 0x1d1d1f, roughness: 0.55 }),
@@ -178,6 +180,13 @@ export class CarView {
       node.position.set(0, 0, 0);
       node.parent!.remove(node);
       steer.add(node);
+      // brake calipers (if the model has them) turn with the wheel but don't spin
+      const cal = scene.getObjectByName(names[i].replace('Wheel_', 'Caliper_'));
+      if (cal) {
+        cal.position.set(0, 0, 0);
+        cal.parent!.remove(cal);
+        steer.add(cal);
+      }
       group.add(steer);
       wheels.push({ steer, spin: node, baseY: ws.y });
     }
@@ -212,6 +221,12 @@ export class CarView {
 
   setPaint(color: number) {
     this.mats.paint.color.setHex(color);
+  }
+
+  /** free this car's materials (the model geometry is shared and cached) */
+  dispose() {
+    for (const m of Object.values(this.mats)) (m as THREE.Material).dispose();
+    this.root.removeFromParent();
   }
 
   /** sync from physics (already interpolated transform passed in) */

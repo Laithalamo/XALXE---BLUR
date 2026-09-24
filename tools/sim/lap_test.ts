@@ -12,7 +12,7 @@ const def = TRACKS.midtown;
 const cl = buildCenterline(def);
 const world = createTrackWorld(def, cl);
 const sp = spawnAt(cl, -18, 0);
-const car = new Vehicle(world, CARS[DEFAULT_CAR], sp.pos, sp.yaw);
+const car = new Vehicle(world, CARS[process.env.CAR ?? DEFAULT_CAR], sp.pos, sp.yaw);
 const dt = 1 / PHYSICS_HZ;
 const grip = Number(process.argv[2] ?? 1.35);
 let t = 0, hint = 0, lastS = -18, travelled = 0, top = 0, hits = 0, maxLat = 0;

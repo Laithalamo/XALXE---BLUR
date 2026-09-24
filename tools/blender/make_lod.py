@@ -55,6 +55,14 @@ def decimate(o, r):
         bpy.ops.object.modifier_apply(modifier=m.name)
 
 body = bpy.data.objects['Body']
+# static brake calipers (cars that have them) go with the body
+for o in list(scene.objects):
+    if o.type == 'EMPTY' and o.name.startswith('Caliper_'):
+        for c in list(o.children):
+            if c.type != 'MESH': continue
+            mw = c.matrix_world.copy()
+            c.parent = body
+            c.matrix_world = mw
 if FAR:
     # paint / glass / lights stay separate (own materials), the rest becomes one mesh
     groups = {}

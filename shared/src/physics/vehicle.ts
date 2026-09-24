@@ -75,6 +75,7 @@ export class Vehicle {
   driftTime = 0;
   driftScore = 0;
   private prevBeta = 0;
+  private readonly wheelbase: number;
   private driftDir = 0;
   private driftCooldown = 0;
 
@@ -86,6 +87,9 @@ export class Vehicle {
 
   constructor(private world: RAPIER.World, spec: CarSpec, pos: V3, yaw: number) {
     this.spec = spec;
+    const fz = spec.wheels.filter((w) => w.front).reduce((a, w) => a + w.z, 0) / 2;
+    const rz = spec.wheels.filter((w) => !w.front).reduce((a, w) => a + w.z, 0) / 2;
+    this.wheelbase = Math.abs(rz - fz) || 2.65;
     const p = spec.physics;
     const desc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(pos.x, pos.y, pos.z)
@@ -430,7 +434,7 @@ export class Vehicle {
       if (contacts >= 3 && speedAbs > 4) {
         // stability control while gripping (and while a drift fades out): damp any rotation
         // beyond what the steering asks for, so exits don't snap the other way
-        const L = 2.65;
+        const L = this.wheelbase;
         const yawKin = (-vFwd * Math.tan(this.wheelSteer)) / L;
         const excess = yawRate - yawKin;
         if (Math.sign(excess) === Math.sign(yawRate) || Math.abs(input.steer) < 0.1) {

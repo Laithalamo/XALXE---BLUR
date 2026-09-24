@@ -22,7 +22,7 @@ const race = new Race(cl, 3, N, 4);
 const cars = Array.from({ length: N }, (_, g) => {
   const sl = gridSlot(g);
   const sp = spawnAt(cl, sl.s, sl.lateral);
-  const v = new Vehicle(world, CARS[DEFAULT_CAR], sp.pos, sp.yaw);
+  const v = new Vehicle(world, CARS[process.env.CAR ?? DEFAULT_CAR], sp.pos, sp.yaw);
   race.place(g, sp.pos.x, sp.pos.z, true);
   return { v, ai: new AIDriver(cl, line, def.roadWidth, diff, 100 + g) };
 });

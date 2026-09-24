@@ -136,12 +136,13 @@ export class Combat {
   private r: Rng;
   private hw: number;
 
-  constructor(private cl: Centerline, roadWidth: number, private corners: Corner[], count: number, maxHealth: number, seed = 4242) {
+  /** maxHealth: one entry per car */
+  constructor(private cl: Centerline, roadWidth: number, private corners: Corner[], maxHealth: number[], seed = 4242) {
     this.r = rng(seed);
     this.hw = roadWidth / 2;
-    for (let i = 0; i < count; i++) {
+    for (const mh of maxHealth) {
       this.cars.push({
-        health: maxHealth, maxHealth, slots: [], sel: 0, shield: 0, shieldHits: 0, surge: 0, wreck: 0, arcLeft: 0, arcTimer: 0,
+        health: mh, maxHealth: mh, slots: [], sel: 0, shield: 0, shieldHits: 0, surge: 0, wreck: 0, arcLeft: 0, arcTimer: 0,
         lastHitBy: -1, lastHitTime: -99, noCrash: 0, lastVx: 0, lastVz: 0, stats: { hits: 0, wrecks: 0, kills: 0, damage: 0 },
       });
     }

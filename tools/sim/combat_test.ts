@@ -21,7 +21,7 @@ const corners = findCorners(cl);
 const world = createTrackWorld(def, cl);
 const N = 8;
 const race = new Race(cl, 3, N, 4);
-const spec = CARS[DEFAULT_CAR];
+const spec = CARS[process.env.CAR ?? DEFAULT_CAR];
 const cars = Array.from({ length: N }, (_, g) => {
   const sl = gridSlot(g);
   const sp = spawnAt(cl, sl.s, sl.lateral);
@@ -30,7 +30,7 @@ const cars = Array.from({ length: N }, (_, g) => {
   return { v, ai: new AIDriver(cl, line, def.roadWidth, diff, 100 + g), think: 1 + g * 0.1 };
 });
 const vehicles = cars.map((c) => c.v);
-const combat = new Combat(cl, def.roadWidth, corners, N, spec.maxHealth);
+const combat = new Combat(cl, def.roadWidth, corners, new Array(N).fill(spec.maxHealth));
 const counts: Record<string, number> = {};
 const dt = 1 / PHYSICS_HZ;
 const hold = emptyInput();

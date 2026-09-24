@@ -5,7 +5,7 @@ weapon power-ups. Private game for friends on the same home WiFi.
 
 > **Status:** Solo combat race on the *Midtown Circuit*: you vs 7 AI cars, 3 laps, 7 power-ups,
 > health and wrecks, start lights, positions, lap times, mini map, turn warnings, drift score.
-> Next: more cars and tracks, menus, profiles, sound, LAN multiplayer.
+> Two cars (Ferrano 458, Kestrel C). Next: more tracks, menus, profiles, sound, LAN multiplayer.
 
 ## Run it (host PC)
 
@@ -41,7 +41,8 @@ Friends just open that second address in Chrome or Edge. No install needed.
 | **1 / 2 / 3** | Graphics: Low / Medium / High |
 | **F** | Auto resolution on/off |
 | **H** | Hide the help box |
-| **Enter** | Race again (on the results screen) |
+| **Esc** | Pause: resume, restart, change car / AI level |
+| **Enter** | Race again (results screen) / restart (pause menu) |
 
 Gamepads work too (RT/LT throttle/brake, left stick steer, A handbrake, B use power-up,
 X/LB next power-up, Y reset, Start = race again).
@@ -55,6 +56,16 @@ X/LB next power-up, Y reset, Start = race again).
   boards mark the outside of every corner on the track too.
 - AI level (Easy / Medium / Hard) is picked on the results screen.
 - Free driving without opponents: add `?race=0` to the address.
+
+## Cars
+
+| Car | Style |
+|---|---|
+| **Ferrano 458** | Rear-wheel drive, highest top speed, loose and easy to drift |
+| **Kestrel C** | All-wheel drive concept, quickest off the line, more grip and health |
+
+Press **Esc** (pause) or use the results screen to pick your car and the AI level;
+the choice is used from the next race. The AI field mixes both cars.
 
 ## Power-ups
 

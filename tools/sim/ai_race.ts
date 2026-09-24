@@ -21,7 +21,7 @@ const N_CARS = Number(process.argv[3] ?? 8);
 const cars = Array.from({ length: N_CARS }, (_, g) => {
   const s = -10 - g * 9 - (g % 2) * 4.5 - 2.4;
   const sp = spawnAt(cl, s, g % 2 === 0 ? 3.6 : -3.6);
-  const v = new Vehicle(world, CARS[DEFAULT_CAR], sp.pos, sp.yaw);
+  const v = new Vehicle(world, CARS[process.env.CAR ?? DEFAULT_CAR], sp.pos, sp.yaw);
   return { v, ai: new AIDriver(cl, line, def.roadWidth, diff, 100 + g), s: ((s % cl.length) + cl.length) % cl.length, lap: 0, hint: -1, laps: [] as number[], lapStart: 0, finished: -1, lateral: 0, stuckEvents: 0 };
 });
 const dt = 1 / PHYSICS_HZ;

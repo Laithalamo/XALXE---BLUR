@@ -6,6 +6,8 @@ import type { CarView } from '../vehicle/CarView';
 
 export interface RacerInfo {
   name: string;
+  /** car model (CARS id) */
+  car: string;
   paint: number;
   /** colour of the dot on the mini map / standings */
   mapColor: string;
@@ -36,9 +38,9 @@ export class Racer {
 
   constructor(
     readonly index: number,
-    readonly info: RacerInfo,
-    readonly vehicle: Vehicle,
-    readonly view: CarView,
+    public info: RacerInfo,
+    public vehicle: Vehicle,
+    public view: CarView,
     public ai: AIDriver | null,
     readonly isPlayer: boolean,
     /** grid box at the start (0 = pole) */

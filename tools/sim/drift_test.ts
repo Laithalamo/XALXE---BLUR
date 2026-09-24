@@ -9,7 +9,7 @@ await RAPIER.init();
 const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 world.timestep = 1 / PHYSICS_HZ;
 world.createCollider(RAPIER.ColliderDesc.cuboid(5000, 1, 5000).setTranslation(0, -1, 0).setFriction(0.9));
-const car = new Vehicle(world, CARS[DEFAULT_CAR], { x: 0, y: 0.25, z: 0 }, 0);
+const car = new Vehicle(world, CARS[process.env.CAR ?? DEFAULT_CAR], { x: 0, y: 0.25, z: 0 }, 0);
 const dt = 1 / PHYSICS_HZ;
 const inp = emptyInput();
 let t = 0;
