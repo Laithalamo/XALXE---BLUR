@@ -43,7 +43,9 @@ function makeMaterials(paintColor: number, flakes: THREE.Texture): Record<string
           vec3 w = pow(abs(normalize(vObjN)), vec3(4.0)); w /= (w.x + w.y + w.z);
           vec3 p = vObjPos * 6.0;
           vec3 f = (texture2D(uFlakes, p.yz).xyz * w.x + texture2D(uFlakes, p.xz).xyz * w.y + texture2D(uFlakes, p.xy).xyz * w.z) * 2.0 - 1.0;
-          normal = normalize(normal + (viewMatrix * vec4(f.x, f.y, 0.0, 0.0)).xyz * 0.35);
+          // subtle sparkle; fades out when flakes get smaller than a pixel (no glitter noise)
+          float fade = clamp(1.0 - length(fwidth(p)) * 1.5, 0.0, 1.0);
+          normal = normalize(normal + (viewMatrix * vec4(f.x, f.y, 0.0, 0.0)).xyz * 0.1 * fade);
         }`,
       );
   };
