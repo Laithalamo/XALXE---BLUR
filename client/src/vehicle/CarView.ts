@@ -164,6 +164,18 @@ export class CarView {
     return this;
   }
 
+  /** use a local reflection probe instead of the global HDRI (null = HDRI) */
+  setEnvMap(tex: THREE.Texture | null) {
+    for (const m of Object.values(this.mats)) {
+      const mat = m as THREE.MeshStandardMaterial;
+      if (!mat.isMeshStandardMaterial) continue;
+      mat.envMap = tex;
+      // the live probe sees the full-strength sky, so it is toned down a little
+      mat.envMapIntensity = tex ? (mat === this.mats.paint ? 0.72 : 0.85) : mat === this.mats.paint ? 1.1 : 1.0;
+      mat.needsUpdate = true;
+    }
+  }
+
   setPaint(color: number) {
     this.mats.paint.color.setHex(color);
   }

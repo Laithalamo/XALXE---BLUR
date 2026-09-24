@@ -39,10 +39,11 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   if (l > uMaxBlur) vel *= uMaxBlur / l;
   vec3 acc = inputColor.rgb;
   float w = 1.0;
-  const int N = 10;
-  float jitter = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+  const int N = 12;
+  // interleaved gradient noise: low-discrepancy per-pixel offset (less visible grain than a hash)
+  float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5;
   for (int i = 0; i < N; i++) {
-    float t = (float(i) + 0.5 + jitter * 0.8) / float(N) - 0.5;
+    float t = (float(i) + 0.5 + jitter * 0.5) / float(N) - 0.5;
     acc += texture2D(inputBuffer, clamp(uv + vel * t, vec2(0.001), vec2(0.999))).rgb;
     w += 1.0;
   }

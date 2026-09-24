@@ -155,7 +155,9 @@ export async function createWorldMaterials(assets: Assets): Promise<WorldMateria
     fragmentHead: NOISE_HEAD,
     replace: [['#include <map_fragment>', /* glsl */ `
       float gn = n4(vWPos.xz / 37.0, 0);
-      diffuseColor.rgb *= mix(vec3(0.85, 0.8, 0.6), vec3(1.05, 1.08, 0.95), gn) * (0.85 + 0.3 * n4(vWPos.xz / 7.0, 1));
+      diffuseColor.rgb *= mix(vec3(0.72, 0.66, 0.46), vec3(0.84, 0.86, 0.66), gn) * (0.85 + 0.3 * n4(vWPos.xz / 7.0, 1));
+      float gl = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+      diffuseColor.rgb = mix(vec3(gl), diffuseColor.rgb, 0.78);
     `]],
   }, 'grass');
 

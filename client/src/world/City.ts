@@ -47,7 +47,6 @@ function srgbToLinear(hex: number) {
 
 export function buildCity(def: TrackDef, cl: Centerline, mats: WorldMaterials, facade: THREE.Material, preset: GraphicsPreset): CityResult {
   const G = def.grid;
-  const R = makeRng(def.seed);
   const group = new THREE.Group();
   group.name = 'city';
   const props: PropSpot[] = [];
@@ -185,10 +184,12 @@ export function buildCity(def: TrackDef, cl: Centerline, mats: WorldMaterials, f
       const td = trackDist(cx, cz);
       const detail = td < 160 ? 0 : td < 420 ? 1 : 2;
       const c = chunk(i, j);
+      // separate random streams: buildings must not change with graphics quality
       const br = makeRng(def.seed ^ (i * 73856093) ^ (j * 19349663));
+      const pr = makeRng((def.seed ^ (i * 83492791) ^ (j * 29765137)) + 0x9e3779b9);
 
       if (isPark(i, j)) {
-        buildPark(c.grass, c.pavers, props, br, x0, z0, x1, z1, trackDist, preset);
+        buildPark(c.grass, c.pavers, props, pr, x0, z0, x1, z1, trackDist, preset);
         continue;
       }
       // raised sidewalk platform + kerb ring
@@ -198,8 +199,8 @@ export function buildCity(def: TrackDef, cl: Centerline, mats: WorldMaterials, f
       }
 
       // street furniture on sidewalks of detailed blocks
-      if (detail === 0 || (detail === 1 && br.chance(0.6))) {
-        addSidewalkProps(props, br, x0, z0, x1, z1, detail, preset, trackDist);
+      if (detail === 0 || (detail === 1 && pr.chance(0.6))) {
+        addSidewalkProps(props, pr, x0, z0, x1, z1, detail, preset, trackDist);
       }
 
       // buildings

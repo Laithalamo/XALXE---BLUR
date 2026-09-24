@@ -21,6 +21,7 @@ import { makeShopSignAtlas } from '../world/banners';
 import { ChaseCamera } from '../vehicle/ChaseCamera';
 import { Hud } from '../ui/Hud';
 import { Effects } from '../fx/Effects';
+import { CarReflections, DETAIL_LAYER } from '../render/Reflections';
 
 const PHYS_DT = 1 / PHYSICS_HZ;
 
@@ -41,6 +42,7 @@ export class Game {
   private env!: Environment;
   private hud: Hud;
   private fx!: Effects;
+  private reflections: CarReflections | null = null;
   private acc = 0;
   private last = 0;
   private prevPos = new THREE.Vector3();
@@ -88,7 +90,9 @@ export class Game {
     const track = buildTrackView(this.def, this.cl, mats);
     this.scene.add(track.group);
     const props = buildProps(city.props, mats);
+    props.group.traverse((o) => o.layers.set(DETAIL_LAYER));
     this.scene.add(props.group);
+    this.camera.layers.enable(DETAIL_LAYER);
 
     progress(0.85, 'car');
     this.world = createTrackWorld(this.def, this.cl);
@@ -100,6 +104,8 @@ export class Game {
     this.scene.add(this.carView.root);
     this.fx = new Effects(this.scene, this.assets, preset.particles);
     await this.fx.init();
+    this.fx.setLayer(DETAIL_LAYER);
+    this.setReflections(preset.dynamicReflections);
 
     this.camera.far = preset.drawDistance;
     this.pipeline.build(this.scene, this.camera, preset, theme.look);
@@ -112,6 +118,7 @@ export class Game {
     this.prevPos.copy(this.curPos);
     this.prevQuat.copy(this.curQuat);
     this.chase.snap();
+    this.reflections?.prime(this.pipeline.renderer, this.scene, this.carView.root, this.curPos);
     this.pipeline.renderer.compile(this.scene, this.camera);
     const warp = Number(this.params.get('warp') ?? 0);
     if (warp > 0) this.warp(warp);
@@ -226,6 +233,7 @@ export class Game {
     this.fx.update(dt, this.car, this.carView, this.lerpQuat);
     this.pipeline.speedFx = clamp((Math.abs(this.car.speed) - 30) / 50, 0, 1);
     if (!render) return;
+    this.reflections?.update(this.pipeline.renderer, this.scene, this.carView.root, this.lerpPos, this.shotMode ? 6 : 2);
     this.pipeline.render(this.shotMode ? 1 / 60 : dt, 0.55);
     this.hud.update(dt, this.car, this.quality, this.def.name, this.pipeline.renderer.info.render.calls);
     if (this.shotMode && this.frames === Number(this.params.get('frames') ?? 8)) (window as unknown as { __shotReady: boolean }).__shotReady = true;
@@ -270,6 +278,12 @@ export class Game {
     this.fx.clearTrails();
   }
 
+  private setReflections(on: boolean) {
+    if (on && !this.reflections) this.reflections = new CarReflections(256);
+    if (!on && this.reflections) { this.reflections.dispose(); this.reflections = null; }
+    this.carView.setEnvMap(this.reflections ? this.reflections.texture : null);
+  }
+
   private setQuality(q: Quality) {
     if (q === this.quality) return;
     this.quality = q;
@@ -279,6 +293,8 @@ export class Game {
     this.camera.far = preset.drawDistance;
     this.pipeline.build(this.scene, this.camera, preset, THEMES[this.def.theme].look);
     this.pipeline.motionBlur.track(this.carView.root, this.carView.half);
+    this.setReflections(preset.dynamicReflections);
+    this.reflections?.prime(this.pipeline.renderer, this.scene, this.carView.root, this.curPos);
     this.hud.toast(`GRAPHICS: ${q.toUpperCase()}`);
   }
 }

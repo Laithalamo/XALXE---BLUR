@@ -211,14 +211,15 @@ const MAP = /* glsl */ `
       fInterior = roomColor(vec2(cx, cy), csz, vec2(bx, floorIdx) + seed * 11.0, seed, Tw, Nw);
       // blinds on some windows
       float bl = hash12(vec2(bx * 3.1, floorIdx * 7.3) + seed);
-      if (!ground && bl > 0.86) {
+      if (!ground && bl > 0.9) {
         float level = hi.y - (hi.y - lo.y) * (0.25 + 0.6 * fract(bl * 13.0));
         if (cy > level) {
           // anti-aliased slats: fade to the average when they get smaller than a pixel
           float slatAA = clamp((fw.y - 0.004) * 90.0, 0.0, 1.0);
           float slat = mix(0.75 + 0.25 * smoothstep(0.35, 0.65, fract(cy / 0.06)), 0.87, slatAA);
           fInterior = vec3(0.0);
-          albedo = mix(albedo, vec3(0.62, 0.6, 0.56) * slat, inGlass);
+          vec3 blindC = mix(vec3(0.38, 0.37, 0.35), vec3(0.55, 0.52, 0.47), fract(bl * 31.0));
+          albedo = mix(albedo, blindC * slat, inGlass);
           fGlass *= 0.15;
         }
       }

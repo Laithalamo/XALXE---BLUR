@@ -311,6 +311,10 @@ export class Effects {
     }
   }
 
+  setLayer(layer: number) {
+    for (const m of [this.skids.mesh, this.smoke.mesh, this.sparks.mesh]) m.layers.set(layer);
+  }
+
   clearTrails() {
     for (let i = 0; i < 4; i++) this.skids.lift(i);
     this.smoke.clear();

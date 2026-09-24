@@ -104,6 +104,7 @@ function treeVariants() {
     for (const k of Object.keys(sections)) sections[k] = Math.max(2, Math.round(sections[k] * 0.55));
     for (const k of Object.keys(segments)) segments[k] = Math.max(3, Math.round(segments[k] * 0.6));
     o.leaves.count = Math.max(4, Math.round(o.leaves.count * 0.5));
+    if (o.leaves.type === 'aspen') o.leaves.type = 'ash' as typeof o.leaves.type; // summer: green leaves only
     o.leaves.size *= 1.35;
     o.seed = seed;
     tree.generate();
@@ -122,9 +123,21 @@ function treeVariants() {
     const lKey = lm.map?.uuid ?? name;
     if (!leafMats.has(lKey)) {
       if (lm.map) lm.map.colorSpace = THREE.SRGBColorSpace;
-      leafMats.set(lKey, new THREE.MeshStandardMaterial({
+      const leaf = new THREE.MeshStandardMaterial({
         map: lm.map, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.75, color: new THREE.Color(0.8, 0.85, 0.75),
-      }));
+      });
+      // keep alpha-tested leaves from vanishing in distant mip levels
+      leaf.onBeforeCompile = (sh) => {
+        sh.fragmentShader = sh.fragmentShader.replace('#include <alphatest_fragment>', `
+          #ifdef USE_MAP
+          { vec2 tsz = vec2(textureSize(map, 0));
+            float lod = log2(max(max(length(dFdx(vMapUv * tsz)), length(dFdy(vMapUv * tsz))), 1.0));
+            diffuseColor.a *= 1.0 + lod * 0.28; }
+          #endif
+          #include <alphatest_fragment>`);
+      };
+      leaf.customProgramCacheKey = () => 'leaf-coverage';
+      leafMats.set(lKey, leaf);
     }
     tree.traverse((o) => {
       const mesh = o as THREE.Mesh;
