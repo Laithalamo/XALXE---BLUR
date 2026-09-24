@@ -1,0 +1,31 @@
+{
+  "name": "dacor_logen",
+  "source": "2009 Dacia Logan (CC BY 4.0)",
+  "rotate_z": 0,
+  "length": 4.288,
+  "texture_edits": [
+    {"material": "^Misc1Mtl$", "fill": [[197, 6, 505, 86, [236, 236, 236]], [206, 114, 326, 147, "row"]]},
+    {"material": "^Interior1Mtl$", "fill": [[290, 128, 470, 176, "row"]]},
+    {"material": "^Gimap1Mtl$", "fill": [[152, 494, 183, 531, "row"]]}
+  ],
+  "delete_materials": ["^Textlogos1Mtl$"],
+  "delete_parts": [[-0.12, 1.98, 0.55, 0.12, 2.1, 0.75, 0.2], [-0.1, -2.15, 0.85, 0.1, -2.05, 1.0, 0.2]],
+  "slots": [
+    ["^Gimap1Mtl$", "paint"],
+    ["^Windowmask1Mtl$", "glass"],
+    ["^Headlights1Mtl$|^Taillights0011Mtl$|^Taillightbumpmap1Mtl$|^Wheelrb1Mtl$|^Misc1Mtl$|^Interior1Mtl$|^Bottom1Mtl$", "orig"]
+  ],
+  "paint_texture": true,
+  "material_params": {
+    "^Misc1Mtl$": {"metallic": 0.35, "roughness": 0.4},
+    "^Bottom1Mtl$": {"metallic": 0.2, "roughness": 0.7},
+    "^Wheelrb1Mtl$": {"metallic": 0.25, "roughness": 0.5},
+    "^Headlights1Mtl$": {"metallic": 0.6, "roughness": 0.12},
+    "^Taillights": {"metallic": 0.2, "roughness": 0.1}
+  },
+  "wheel_geometry": true,
+  "wheel_candidates": ["^Wheelrb1Mtl$"],
+  "tyre_all": true,
+  "tyre_keep": 1.0,
+  "max_texture": 1024
+}

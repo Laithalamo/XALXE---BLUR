@@ -1,0 +1,28 @@
+{
+  "name": "bavra_r3",
+  "source": "2010 BMW M3 (E92) by ilvskf (CC BY 4.0)",
+  "rotate_z": 180,
+  "scale": 0.8964,
+  "delete_materials": ["M3_BADGE", "bmw_badge", "bmw_emblems", "HEADLIGHTS_BADGE", "SW_M_BADGE", "SW_BADGES", "AIRBAG_BADGES", "GLASS_BADGES", "Badges-material",
+                       "greycamber", "bluecamber", "silvershaft", "GAUGE_MEANINGS", "AIRBAG_WARNING", "INT_SYMBOLS"],
+  "delete_parts": [[-0.06, 2.0, 0.62, 0.06, 2.1, 0.72, 0.12]],
+  "slots": [
+    ["^Paint$|EXT_CARPAINT", "paint"],
+    ["ZE40", "rim"], ["Lugnuts", "metal"], ["TYRE", "tire"], ["^calipers$|CALIPERS_CIRCLES", "caliper"], ["DISC_BRAKE", "brake_disc"],
+    ["^carbon$", "carbon"],
+    ["^chrome$|EXT_CHROME|^Mirrors$|PLATE_LIGHT", "chrome"],
+    ["EXT_GLASS\\.|INT_GLASS|GLASS_PATTERN|DEFROST|HEADLIGHTS_GLASS|DASHBOARD_GLASS", "glass"],
+    ["TAILLIGHTS|INT_REAR_LIGHT", "light_tail"],
+    ["BLINKER|GLASS_ORANGE", "signal"],
+    ["LIGHTS_EMISSIVE|HEADLIGHTS", "light_head"],
+    ["^exhaust$", "metal"],
+    ["leather|LEATHER|SW_STITCH|STITCH_BLACK", "leather"], ["steerred", "leather_accent"],
+    ["carpet|FLOOR_MATS", "carpet"], ["HEADLINER", "interior_mid"],
+    ["^interior_plastic|^Interior_plastic|^INT_|^material$|interior_display|shifter", "interior_dark"]
+  ],
+  "default_slot": "black_plastic",
+  "wheel_extra": ["Lugnuts"],
+  "decimate": {"interior_dark": 0.04, "leather": 0.04, "interior_mid": 0.12, "rim": 0.12, "caliper": 0.1, "brake_disc": 0.2,
+               "black_plastic": 0.3, "paint": 0.35, "chrome": 0.3, "metal": 0.2, "carpet": 0.15, "tire": 0.5,
+               "light_head": 0.4, "light_tail": 0.4, "glass": 0.5, "carbon": 0.5, "signal": 0.5, "leather_accent": 0.3}
+}

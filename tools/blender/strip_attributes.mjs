@@ -1,9 +1,14 @@
-// Drop vertex attributes the game never uses (no textures on cars): UVs, tangents, extra colours.
-// usage: node strip.mjs in.glb out.glb
+// Drop what the game never uses, then compress for the web:
+//  - UVs / tangents / extra colours on untextured meshes (the game swaps in its own slot materials)
+//  - on textured materials (a paint tint map or "orig_*" slots) only the base colour texture is kept
+//  - textures -> WebP, geometry -> meshopt
+// Needs @gltf-transform/core, /extensions, /functions, meshoptimizer and sharp (npm i in a scratch folder).
+// usage: node strip_attributes.mjs in.glb out.glb
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { prune } from '@gltf-transform/functions';
+import { prune, textureCompress, meshopt } from '@gltf-transform/functions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
+import sharp from 'sharp';
 await MeshoptDecoder.ready;
 await MeshoptEncoder.ready;
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
@@ -19,11 +24,22 @@ for (const m of doc.getRoot().listMeshes()) for (const p of m.listPrimitives()) 
   p.setMaterial(mat);
   console.log('material', slot, '->', m.getName());
 }
-doc.getRoot().listExtensionsUsed().find((e) => e.extensionName === 'KHR_materials_variants')?.dispose();
-for (const m of doc.getRoot().listMeshes()) for (const p of m.listPrimitives()) {
-  for (const a of ['TANGENT', 'TEXCOORD_0', 'TEXCOORD_1', 'COLOR_1']) if (p.getAttribute(a)) { p.setAttribute(a, null); n++; }
+// material extensions from the sources (variants, specular, clearcoat...) are not used by the game
+for (const e of doc.getRoot().listExtensionsUsed()) if (e.extensionName.startsWith('KHR_materials_')) e.dispose();
+for (const mat of doc.getRoot().listMaterials()) {
+  mat.setNormalTexture(null).setMetallicRoughnessTexture(null).setOcclusionTexture(null).setEmissiveTexture(null);
+  if (!mat.getBaseColorTexture()) continue;
+  mat.setAlphaMode('OPAQUE'); // texture alpha from ripped models is unreliable; glass is its own slot
 }
-for (const t of doc.getRoot().listTextures()) t.dispose();
-await doc.transform(prune({ keepLeaves: true }));
+for (const m of doc.getRoot().listMeshes()) for (const p of m.listPrimitives()) {
+  const textured = !!p.getMaterial()?.getBaseColorTexture();
+  for (const a of ['TANGENT', 'TEXCOORD_1', 'COLOR_1', ...(textured ? [] : ['TEXCOORD_0'])]) if (p.getAttribute(a)) { p.setAttribute(a, null); n++; }
+}
+await doc.transform(
+  prune({ keepLeaves: true }),
+  textureCompress({ encoder: sharp, targetFormat: 'webp', quality: 86 }),
+  meshopt({ encoder: MeshoptEncoder, level: 'medium' }),
+);
 await io.write(process.argv[3], doc);
-console.log('removed', n, 'attributes');
+const tex = doc.getRoot().listTextures().map((t) => `${t.getName() || 'tex'} ${t.getSize()?.join('x')} ${(t.getImage()?.byteLength / 1024).toFixed(0)}KB`);
+console.log('removed', n, 'attributes; textures:', tex.join(', ') || 'none');

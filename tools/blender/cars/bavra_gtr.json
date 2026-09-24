@@ -1,0 +1,19 @@
+{
+  "name": "bavra_gtr",
+  "source": "2001 BMW M3 GTR by Dave Love (CC BY 4.0)",
+  "rotate_z": 180,
+  "scale": 1.0,
+  "delete_materials": ["DECAL_BADGING", "CALIPERDECAL"],
+  "delete_parts": [[-0.06, 1.95, 0.66, 0.06, 2.03, 0.72, 0.1], [-0.06, -2.29, 0.87, 0.06, -2.24, 0.96, 0.1]],
+  "slot_boxes": [{"box": [-0.85, 1.7, 0.48, 0.85, 2.0, 0.68], "from": "light_tail", "to": "signal"}],
+  "slots": [
+    ["CARSKIN", "paint"],
+    ["_RIM$", "rim"], ["RUBBER_TREAD", "tire"], ["CALIPER_SKIN", "caliper"], ["BRAKEDISC", "brake_disc"],
+    ["WINDSHIELD|HEADLIGHTGLASS_WHITE", "glass"], ["HEADLIGHTGLASS_NEON", "light_drl"], ["HEADLIGHT_HEADLIGHT", "light_head"],
+    ["BRAKELIGHT|KIT00_BRAKELIGHT", "light_tail"],
+    ["CHROME", "chrome"], ["ALUMINUM", "metal"], ["ENGINE", "metal_dark"], ["BOTTOM_SKIN", "metal_dark"],
+    ["INTERIOR", "interior_dark"], ["DOOR_HANDLE|GRILL|WINDOWMASK", "black_plastic"], ["LICENSEPLATE", "plastic"]
+  ],
+  "default_slot": "black_plastic",
+  "decimate": {"rim": 0.45, "metal_dark": 0.6}
+}

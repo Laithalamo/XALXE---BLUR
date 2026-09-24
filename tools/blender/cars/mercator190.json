@@ -1,0 +1,22 @@
+{
+  "name": "mercator190",
+  "source": "1982 Mercedes W201 by Dave Love (CC BY 4.0)",
+  "rotate_z": 180,
+  "scale": 1.0,
+  "delete_materials": ["EXT_Badges", "EXT_Rim_Badge", "INT_Badge", "EXT_Rim_Blur", "EXT_Rim_Emblem_Blur"],
+  "delete_parts": [[-0.05, 1.88, 0.76, 0.05, 1.94, 0.87, 0.1], [-0.06, -2.3, 0.77, 0.06, -2.26, 0.87, 0.1]],
+  "slots": [
+    ["^(EXT|ENG)_Car_Paint", "paint"],
+    ["^EXT_Rim$", "rim"], ["EXT_Rim_Bolts", "metal"],
+    ["EXT_Tyre", "tire"], ["EXT_Calipers", "caliper"], ["EXT_Brake_Disc", "brake_disc"],
+    ["^EXT_Glass|^INT_Glass", "glass"], ["^HL_", "light_head"], ["^TL_", "light_tail"],
+    ["EXT_Chrome|INT_Chrome|EXT_Mirror", "chrome"],
+    ["EXT_Exhaust|ENG_Radiator", "metal"], ["ENG_Main|EXT_Chassis", "metal_dark"],
+    ["EXT_Plastic|EXT_Black", "black_plastic"],
+    ["INT_Leather|INT_Stitching|INT_Seatbelt", "leather"], ["INT_Carpet", "carpet"], ["INT_Cloth|INT_Ceiling", "interior_mid"],
+    ["INT_Wood", "leather_accent"], ["^INT_", "interior_dark"], ["Plate_D", "plastic"]
+  ],
+  "default_slot": "black_plastic",
+  "wheel_extra": ["EXT_Rim_Bolts"],
+  "decimate": {"interior_dark": 0.3, "leather": 0.3, "carpet": 0.5, "interior_mid": 0.5, "rim": 0.3, "black_plastic": 0.55, "metal_dark": 0.35, "paint": 0.75, "tire": 0.6, "light_head": 0.5, "caliper": 0.3}
+}

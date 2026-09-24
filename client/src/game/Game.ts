@@ -39,14 +39,16 @@ const HOLD = emptyInput();
 
 /** the other drivers (names are made up; colours = paint + a readable mini map colour) */
 const ROSTER: RacerInfo[] = [
-  { name: 'KADE', car: 'ferrano458', paint: 0xf0b400, mapColor: '#ffc21a' },
-  { name: 'MIRA', car: 'kestrel', paint: 0x0b3d91, mapColor: '#4a86ff' },
-  { name: 'JUNO', car: 'ferrano458', paint: 0xe8e8e8, mapColor: '#f2f2f2' },
-  { name: 'REX', car: 'kestrel', paint: 0x101010, mapColor: '#9aa0a8' },
-  { name: 'NOVA', car: 'kestrel', paint: 0x0d6b3a, mapColor: '#2bd66f' },
-  { name: 'VEX', car: 'ferrano458', paint: 0xff5a00, mapColor: '#ff7a1f' },
-  { name: 'LINA', car: 'kestrel', paint: 0x4b1d8f, mapColor: '#b070ff' },
+  { name: 'KADE', car: 'kestrel', paint: 0xf0b400, mapColor: '#ffc21a' },
+  { name: 'MIRA', car: 'bavra_gtr', paint: 0x0b3d91, mapColor: '#4a86ff' },
+  { name: 'JUNO', car: 'renova_clyo', paint: 0xe8e8e8, mapColor: '#f2f2f2' },
+  { name: 'REX', car: 'tugra_t10', paint: 0x3d6b7c, mapColor: '#3fc1c9' },
+  { name: 'NOVA', car: 'mercator190', paint: 0x0d6b3a, mapColor: '#2bd66f' },
+  { name: 'VEX', car: 'bavra_r3', paint: 0xff5a00, mapColor: '#ff7a1f' },
+  { name: 'LINA', car: 'dacor_logen', paint: 0x4b1d8f, mapColor: '#b070ff' },
 ];
+
+const DRIVE = { front: 'FWD', rear: 'RWD', all: 'AWD' } as const;
 
 /** forward direction (XZ) of a car from its rotation */
 const fwdX = (q: THREE.Quaternion) => -2 * (q.x * q.z + q.w * q.y);
@@ -386,14 +388,14 @@ export class Game {
         break;
       case 'wreck': {
         const rc = this.racers[e.car];
-        rc.view.setPaint(0x161616);
+        rc.view.setWrecked(true, rc.info.paint);
         this.hud.feed(e.by >= 0 ? `${name(e.by)} wrecked ${name(e.car)}` : `${name(e.car)} wrecked`);
         if (e.car === pl) this.hud.hurt(1);
         break;
       }
       case 'respawn': {
         const rc = this.racers[e.car];
-        rc.view.setPaint(rc.info.paint);
+        rc.view.setWrecked(false, rc.info.paint);
         this.respawn(rc);
         break;
       }
@@ -718,7 +720,7 @@ export class Game {
     return {
       difficulty: this.difficulty,
       car: this.carId,
-      cars: CAR_IDS.map((id) => ({ id, name: CARS[id].name.toUpperCase(), stats: CARS[id].stats })),
+      cars: CAR_IDS.map((id) => ({ id, name: CARS[id].name.toUpperCase(), drive: DRIVE[CARS[id].physics.driven], stats: CARS[id].stats })),
       carNote: changed ? `${CARS[this.carId].name.toUpperCase()} — READY FOR THE NEXT RACE` : undefined,
     };
   }
@@ -796,7 +798,7 @@ export class Game {
     this.hud.setPanel(null);
     this.combat.reset();
     this.combatView.clear();
-    for (const rc of this.racers) rc.view.setPaint(rc.info.paint);
+    for (const rc of this.racers) rc.view.setWrecked(false, rc.info.paint);
     this.fx.clearAll();
     this.pipeline.motionBlur.resetHistory();
     this.chase.snap();

@@ -5,7 +5,7 @@ weapon power-ups. Private game for friends on the same home WiFi.
 
 > **Status:** Solo combat race on the *Midtown Circuit*: you vs 7 AI cars, 3 laps, 7 power-ups,
 > health and wrecks, start lights, positions, lap times, mini map, turn warnings, drift score.
-> Two cars (Ferrano 458, Kestrel C). Next: more tracks, menus, profiles, sound, LAN multiplayer.
+> Eight cars. Next: more tracks, menus, profiles, sound, LAN multiplayer.
 
 ## Run it (host PC)
 
@@ -59,13 +59,19 @@ X/LB next power-up, Y reset, Start = race again).
 
 ## Cars
 
-| Car | Style |
-|---|---|
-| **Ferrano 458** | Rear-wheel drive, highest top speed, loose and easy to drift |
-| **Kestrel C** | All-wheel drive concept, quickest off the line, more grip and health |
+| Car | Drive | Style |
+|---|---|---|
+| **Ferrano 458** | RWD | Highest top speed, loose and easy to drift |
+| **Kestrel C** | AWD | Concept car, quickest off the line, lots of grip |
+| **Bavra R3 GTR** | RWD | Light race car: fast, sharp, big downforce — but fragile |
+| **Bavra R3 Coupe** | RWD | Tuned coupe with a wing, all-rounder |
+| **Mercator 190E** | RWD | 80s sports saloon, soft and slidey |
+| **Renova Clyo RS** | FWD | Hot hatch, nimble in the tight turns |
+| **Dacor Logen** | FWD | Everyday saloon: slow and soft, but hard to wreck |
+| **Tugra T10** | AWD | Electric SUV: heaviest and toughest, strong launch |
 
 Press **Esc** (pause) or use the results screen to pick your car and the AI level;
-the choice is used from the next race. The AI field mixes both cars.
+the choice is used from the next race. The AI field mixes all the cars.
 
 ## Power-ups
 
@@ -106,5 +112,12 @@ npm run typecheck  # TypeScript checks
 Folders: `client/` (game), `server/` (host server), `shared/` (physics + track
 data used by both), `assets/` (models, textures, HDRIs), `tools/` (texture
 generator, Blender car pipeline, physics tests).
+
+Adding a car: write a settings file in `tools/blender/cars/` (orientation, size, which source
+materials map to which game material, which logos to delete or paint out), run
+`tools/blender/process_model.py` with Blender's Python, then `tools/blender/build_car.sh`
+to get the game model and its two lighter versions for AI cars, and add a spec in
+`shared/src/cars.ts`. Physics checks: `npx tsx tools/sim/lap_test.ts` (`CAR=<id>`),
+`CAR=mix npx tsx tools/sim/race_test.ts`.
 
 Asset sources and licences: see [CREDITS.md](CREDITS.md).

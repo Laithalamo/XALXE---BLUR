@@ -1,0 +1,31 @@
+{
+  "name": "renova_clyo",
+  "source": "Renault Clio R.S. 200 EDC by amogusstrikesback2 (CC BY 4.0)",
+  "rotate_z": 180,
+  "scale": 1.0,
+  "texture_edits": [
+    {"material": "^Material\\.001$",
+     "fill": [[362, 876, 394, 927, [22, 22, 24]], [754, 428, 789, 539, [236, 236, 236]]],
+     "delete_uv": [[572, 122, 642, 184], [993, 288, 1022, 408], [8, 260, 25, 312], [712, 997, 757, 1022], [988, 994, 1024, 1021]]},
+    {"material": "^Material\\.002$", "fill": [[96, 118, 123, 145, "row"], [226, 26, 254, 54, "row"], [114, 256, 188, 275, "row"], [86, 341, 188, 360, "row"]]}
+  ],
+  "add_boxes": [{"box": [-0.075, 2.035, 0.585, 0.075, 2.047, 0.725], "slot": "black_plastic"}],
+  "delete_parts": [[-0.09, 2.05, 0.57, 0.09, 2.15, 0.77, 0.2], [-0.05, 2.1, 0.53, 0.05, 2.14, 0.57, 0.05], [-0.13, -1.9, 0.76, 0.13, -1.82, 0.96, 0.13]],
+  "slots": [
+    ["obj:bone_caliper", "caliper"],
+    ["^Material\\.001$", "paint"],
+    ["^Material\\.002$", "orig"],
+    ["^Material\\.006$", "tire"],
+    ["obj:lights_brakes", "light_brake"],
+    ["^Material\\.007$", "delete"],
+    ["^Material\\.003$|obj:detach_bumper_F_25_licenseplate", "plastic"],
+    ["obj:glasses_glass", "glass"]
+  ],
+  "default_slot": "black_plastic",
+  "paint_texture": true,
+  "remove_overlaps": ["paint"],
+  "wheel_extra": ["^Material\\.002$"],
+  "crop_to_slot": "paint",
+  "crop_pad": 0.1,
+  "max_texture": 1024
+}

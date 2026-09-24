@@ -16,7 +16,7 @@ GROUP = {  # source slot -> LOD slot
   'paint': 'paint', 'glass': 'glass', 'chrome': 'chrome', 'metal': 'chrome', 'rim': 'chrome',
   'light_tail': 'light_tail', 'light_brake': 'light_tail', 'light_head': 'light_head', 'light_drl': 'light_head',
 }
-RATIO = {'paint': 0.28, 'glass': 0.4, 'chrome': 0.25, 'dark': 0.14, 'light_tail': 0.3, 'light_head': 0.4, 'wheel': 0.3}
+RATIO = {'paint': 0.28, 'glass': 0.4, 'chrome': 0.25, 'dark': 0.14, 'light_tail': 0.3, 'light_head': 0.4, 'wheel': 0.3, 'tex': 0.3}
 RATIO = {k: v * DETAIL for k, v in RATIO.items()}
 mats = {}
 def mat(name):
@@ -39,6 +39,19 @@ def color_attr(o, rgb):
 SLOT_RGB = {'chrome': (0.8, 0.8, 0.82), 'metal': (0.33, 0.34, 0.36), 'rim': (0.6, 0.62, 0.66), 'tire': (0.02, 0.02, 0.02),
             'brake_disc': (0.4, 0.4, 0.42), 'metal_dark': (0.05, 0.05, 0.055)}
 
+def textured(o):
+    # textured parts (a paint tint map, 'orig_*' source materials) keep their own material and UVs
+    m = o.data.materials[0] if o.data.materials else None
+    return bool(m and m.use_nodes and any(n.type == 'TEX_IMAGE' and n.image for n in m.node_tree.nodes))
+
+def keep_textured(objs, name, ratio):
+    # join per material, keep the material
+    by = {}
+    for o in objs: by.setdefault(o.data.materials[0].name, []).append(o)
+    for mname, grp in by.items():
+        o = join(grp, name + '_' + mname)
+        decimate(o, ratio)
+
 def join(objs, name):
     bpy.ops.object.select_all(action='DESELECT')
     for o in objs: o.select_set(True)
@@ -49,6 +62,10 @@ def join(objs, name):
     return o
 
 def decimate(o, r):
+    # weld the pieces split along UV seams first, or decimation opens cracks between them
+    bpy.ops.object.select_all(action='DESELECT'); o.select_set(True); bpy.context.view_layer.objects.active = o
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.remove_doubles(threshold=0.00005); bpy.ops.object.mode_set(mode='OBJECT')
     if r < 1:
         m = o.modifiers.new('d', 'DECIMATE'); m.ratio = r
         bpy.context.view_layer.objects.active = o
@@ -67,17 +84,24 @@ if FAR:
     # paint / glass / lights stay separate (own materials), the rest becomes one mesh
     groups = {}
     rest = []
+    tex = []
     for c in list(body.children):
         if c.type != 'MESH': continue
         slot = c.data.materials[0].name if c.data.materials else 'dark'
         g = GROUP.get(slot, 'dark')
-        if g in ('paint', 'glass', 'light_tail', 'light_head'):
+        if textured(c):
+            tex.append(c)
+        elif g in ('paint', 'glass', 'light_tail', 'light_head'):
             groups.setdefault(g, []).append(c)
         else:
             color_attr(c, SLOT_RGB.get(slot, (0.03, 0.03, 0.035)))
             rest.append(c)
+    keep_textured(tex, 'Body', RATIO['tex'])
     for tag in ('FL', 'FR', 'RL', 'RR'):
-        for k in [c for c in bpy.data.objects['Wheel_' + tag].children if c.type == 'MESH']:
+        kids = [c for c in bpy.data.objects['Wheel_' + tag].children if c.type == 'MESH']
+        keep_textured([k for k in kids if textured(k)], 'Wheel_' + tag, RATIO['wheel'])
+        for k in kids:
+            if textured(k): continue
             slot = k.data.materials[0].name if k.data.materials else ''
             color_attr(k, SLOT_RGB.get(slot, (0.6, 0.62, 0.66)))
             rest.append(k)
@@ -85,17 +109,22 @@ if FAR:
         o = join(objs, 'Body_' + g)
         o.data.materials.clear(); o.data.materials.append(mat(g))
         decimate(o, RATIO[g])
-    o = join(rest, 'Body_rest')
-    o.parent = body
-    o.data.materials.clear(); o.data.materials.append(mat('rest'))
-    decimate(o, RATIO['dark'])
+    if rest:
+        o = join(rest, 'Body_rest')
+        o.parent = body
+        o.data.materials.clear(); o.data.materials.append(mat('rest'))
+        decimate(o, RATIO['dark'])
 else:
     groups = {}
+    tex = []
     for c in list(body.children):
         if c.type != 'MESH': continue
+        if textured(c):
+            tex.append(c); continue
         slot = c.data.materials[0].name if c.data.materials else 'dark'
         g = GROUP.get(slot, 'dark')
         groups.setdefault(g, []).append(c)
+    keep_textured(tex, 'Body', RATIO['tex'])
     for g, objs in groups.items():
         o = join(objs, 'Body_' + g)
         o.data.materials.clear(); o.data.materials.append(mat(g))
@@ -104,6 +133,9 @@ else:
     for tag in ('FL', 'FR', 'RL', 'RR'):
         piv = bpy.data.objects['Wheel_' + tag]
         kids = [c for c in piv.children if c.type == 'MESH']
+        keep_textured([k for k in kids if textured(k)], 'Wheel_' + tag, RATIO['wheel'])
+        kids = [k for k in kids if not textured(k)]
+        if not kids: continue
         for k in kids:
             slot = k.data.materials[0].name if k.data.materials else ''
             color_attr(k, (0.02, 0.02, 0.02) if slot == 'tire' else (0.6, 0.62, 0.66))

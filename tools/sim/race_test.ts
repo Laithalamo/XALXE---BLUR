@@ -1,13 +1,13 @@
 // Headless race with the shared Race rules: 8 AI cars, grid start, countdown, 3 laps.
 // Checks lap counting, finish order, and that lap times add up to the race time.
-// Run: npx tsx tools/sim/race_test.ts [difficulty]
+// Run: npx tsx tools/sim/race_test.ts [difficulty]   (CAR=<id> for one model, CAR=mix for one of each)
 import RAPIER from '@dimforge/rapier3d-compat';
 import { TRACKS } from '../../shared/src/track/trackDefs';
 import { buildCenterline } from '../../shared/src/track/centerline';
 import { buildRacingLine } from '../../shared/src/track/racingLine';
 import { createTrackWorld, spawnAt, PHYSICS_HZ } from '../../shared/src/physics/trackPhysics';
 import { Vehicle, emptyInput } from '../../shared/src/physics/vehicle';
-import { CARS, DEFAULT_CAR } from '../../shared/src/cars';
+import { CARS, CAR_IDS, DEFAULT_CAR } from '../../shared/src/cars';
 import { AIDriver, type AICarState, type Difficulty } from '../../shared/src/ai/driver';
 import { Race, gridSlot } from '../../shared/src/race/race';
 
@@ -22,7 +22,8 @@ const race = new Race(cl, 3, N, 4);
 const cars = Array.from({ length: N }, (_, g) => {
   const sl = gridSlot(g);
   const sp = spawnAt(cl, sl.s, sl.lateral);
-  const v = new Vehicle(world, CARS[process.env.CAR ?? DEFAULT_CAR], sp.pos, sp.yaw);
+  const id = process.env.CAR === 'mix' ? CAR_IDS[g % CAR_IDS.length] : process.env.CAR ?? DEFAULT_CAR;
+  const v = new Vehicle(world, CARS[id], sp.pos, sp.yaw);
   race.place(g, sp.pos.x, sp.pos.z, true);
   return { v, ai: new AIDriver(cl, line, def.roadWidth, diff, 100 + g) };
 });
@@ -68,6 +69,6 @@ for (let i = 0; i < N; i++) {
   const sum = laps.reduce((a, b) => a + b, 0);
   const good = r.finished && laps.length === 3 && Math.abs(sum - r.finishTime) < 0.05;
   if (!good) ok = false;
-  console.log(`car${i}: laps ${laps.map((l) => l.toFixed(1)).join(' / ')} sum ${sum.toFixed(2)} finish ${r.finishTime.toFixed(2)} best ${r.bestLap?.toFixed(2)} ${good ? 'OK' : 'BAD'}`);
+  console.log(`car${i} ${cars[i].v.spec.id.padEnd(12)}: laps ${laps.map((l) => l.toFixed(1)).join(' / ')} sum ${sum.toFixed(2)} finish ${r.finishTime.toFixed(2)} best ${r.bestLap?.toFixed(2)} ${good ? 'OK' : 'BAD'}`);
 }
 console.log('standings', race.standings().join(','), 'order', race.finishOrder.join(','), 'respawns', respawns, ok ? 'ALL OK' : 'PROBLEM');

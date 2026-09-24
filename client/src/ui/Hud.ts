@@ -40,7 +40,7 @@ export interface PanelInfo {
   place?: number;
   difficulty: string;
   car: string;
-  cars: { id: string; name: string; stats: { speed: number; acceleration: number; handling: number; health: number } }[];
+  cars: { id: string; name: string; drive: string; stats: { speed: number; acceleration: number; handling: number; health: number } }[];
   carNote?: string;
 }
 
@@ -239,7 +239,7 @@ export class Hud {
       .map((d) => `<button data-act="diff" data-v="${d}" class="${d === p.difficulty ? 'on' : ''}">${d.toUpperCase()}</button>`)
       .join('');
     const cars = p.cars
-      .map((c) => `<button data-act="car" data-v="${c.id}" class="car${c.id === p.car ? ' on' : ''}">${c.name}<small>SPD ${c.stats.speed} · ACC ${c.stats.acceleration} · HDL ${c.stats.handling} · HP ${c.stats.health}</small></button>`)
+      .map((c) => `<button data-act="car" data-v="${c.id}" class="car${c.id === p.car ? ' on' : ''}">${c.name}<small>${c.drive} · SPD ${c.stats.speed} · ACC ${c.stats.acceleration} · HDL ${c.stats.handling} · HP ${c.stats.health}</small></button>`)
       .join('');
     const title = p.mode === 'pause' ? 'PAUSED' : `${p.place}<span>${ordinal(p.place ?? 0)}</span> PLACE`;
     const table = rows.length
@@ -253,7 +253,7 @@ export class Hud {
         <div class="title">${title}</div>
         ${table}
         <div class="opts"><span>AI</span>${diffs}</div>
-        <div class="opts cars"><span>CAR</span>${cars}</div>
+        <div class="opts cars"><span>CAR</span><div class="grid">${cars}</div></div>
         ${p.carNote ? `<div class="note">${p.carNote}</div>` : ''}
         ${buttons}
       </div>`;

@@ -285,7 +285,8 @@ export class Vehicle {
 
     // ---- tyre forces ------------------------------------------------------------------
     const downforce = p.downforce * vFwd * vFwd;
-    const rearDriven = p.driven === 'rear';
+    const layout = p.driven;
+    const isDriven = (front: boolean) => layout === 'all' || (layout === 'front') === front;
     let slideSum = 0;
     for (let i = 0; i < this.wheels.length; i++) {
       const w = this.wheels[i];
@@ -294,7 +295,7 @@ export class Vehicle {
       if (!w.inContact) {
         w.slipLat = 0;
         w.slipLong = 0;
-        const driven = rearDriven ? !front : true;
+        const driven = isDriven(front);
         w.spinSpeed = driven && input.throttle > 0.1 ? Math.min(w.spinSpeed + 60 * dt, 120) : w.spinSpeed * 0.985;
         w.spin += w.spinSpeed * dt;
         continue;
@@ -316,12 +317,12 @@ export class Vehicle {
       const N = w.load + downforce * 0.25;
       const mu = p.grip * (front ? 1 : p.rearGripBias);
       const muN = mu * N;
-      const driven = rearDriven ? !front : true;
+      const driven = isDriven(front);
 
       // longitudinal
       let fx = 0;
       if (driven && drive !== 0) {
-        const share = rearDriven ? 0.5 : front ? 0.2 : 0.3;
+        const share = layout !== 'all' ? 0.5 : front ? 0.2 : 0.3;
         fx += drive * share;
         // open diff + traction control: both wheels on an axle get the same force,
         // limited by the less loaded one, keeping lateral grip in reserve

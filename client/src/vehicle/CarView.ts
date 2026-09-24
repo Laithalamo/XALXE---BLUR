@@ -161,10 +161,17 @@ export class CarView {
     scene.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
-      const slot = (m.material as THREE.Material).name.replace(/\.\d+$/, '');
-      const mat = this.mats[slot];
-      if (mat) m.material = mat;
-      else console.warn('car: no material for slot', slot);
+      const srcMat = m.material as THREE.MeshStandardMaterial;
+      const slot = srcMat.name.replace(/\.\d+$/, '');
+      if (slot === 'paint' && srcMat.map && m.geometry.getAttribute('uv')) {
+        // paint with a tint mask texture (baked shading, seams): white areas take the paint colour
+        m.material = this.paintMapped(srcMat.map);
+      } else if (slot.startsWith('orig_')) {
+        // parts that keep the source model's own textured material
+        m.material = (this.mats[slot] ??= this.origMaterial(srcMat));
+      } else if (this.mats[slot]) {
+        m.material = this.mats[slot];
+      } else console.warn('car: no material for slot', slot);
       m.castShadow = slot !== 'glass';
       m.receiveShadow = true;
     });
@@ -195,6 +202,32 @@ export class CarView {
     return { group, wheels };
   }
 
+  private paintMapped(map: THREE.Texture) {
+    let m = this.mats.paint_mapped as THREE.MeshPhysicalMaterial | undefined;
+    if (!m) {
+      const paint = this.mats.paint;
+      m = paint.clone();
+      m.onBeforeCompile = paint.onBeforeCompile;
+      m.customProgramCacheKey = () => 'car-paint-mapped';
+      m.map = map;
+      // the mask's dark areas (baked shading, black trim, seams) also shade the reflections,
+      // otherwise dark texels under the clearcoat read as bright silver
+      m.aoMap = map;
+      // ...and they are trim, not paint: no clearcoat or metal flake there
+      m.clearcoatMap = map;
+      m.metalnessMap = map;
+      this.mats.paint_mapped = m;
+    }
+    return m;
+  }
+
+  private origMaterial(src: THREE.MeshStandardMaterial) {
+    const m = src.clone();
+    m.side = THREE.DoubleSide;
+    m.envMapIntensity = 1;
+    return m;
+  }
+
   private setLevel(i: number) {
     this.level = i;
     this.levels.forEach((l, k) => { l.group.visible = k === i; });
@@ -214,13 +247,23 @@ export class CarView {
       if (!mat.isMeshStandardMaterial) continue;
       mat.envMap = tex;
       // the live probe sees the full-strength sky, so it is toned down a little
-      mat.envMapIntensity = tex ? (mat === this.mats.paint ? 0.72 : 0.85) : mat === this.mats.paint ? 1.1 : 1.0;
+      const paint = mat === this.mats.paint || mat === this.mats.paint_mapped;
+      mat.envMapIntensity = tex ? (paint ? 0.72 : 0.85) : paint ? 1.1 : 1.0;
       mat.needsUpdate = true;
     }
   }
 
   setPaint(color: number) {
     this.mats.paint.color.setHex(color);
+    (this.mats.paint_mapped as THREE.MeshPhysicalMaterial | undefined)?.color.setHex(color);
+  }
+
+  /** burnt-out look while wrecked (paint and the model's own textured parts go dark) */
+  setWrecked(on: boolean, paint: number) {
+    this.setPaint(on ? 0x161616 : paint);
+    for (const [slot, m] of Object.entries(this.mats)) {
+      if (slot.startsWith('orig_')) (m as THREE.MeshStandardMaterial).color.setScalar(on ? 0.14 : 1);
+    }
   }
 
   /** free this car's materials (the model geometry is shared and cached) */
