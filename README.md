@@ -21,6 +21,8 @@ weapon power-ups. Private game for friends on the same home WiFi.
 
 Friends just open that second address in Chrome or Edge. No install needed.
 
+> **Windows:** easiest is to double-click **`start.bat`**. In PowerShell, type `npm.cmd start`
+> (plain `npm start` is blocked by PowerShell's script policy).
 > Windows may ask to allow Node.js through the firewall — click **Allow** (private networks).
 
 ## Controls
