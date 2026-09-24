@@ -3,6 +3,7 @@ import type { Corner } from '@shared/track/corners';
 import type { Quality } from '../core/Settings';
 import { POWERS, type PowerKind } from '@shared/race/powerups';
 import { powerIconUrl } from './powerIcons';
+import { clamp } from '@shared/math';
 
 const SEVERITY_LABEL: Record<Corner['severity'], string> = {
   kink: 'FLAT OUT', fast: 'FAST', medium: 'MEDIUM', sharp: 'SHARP', hairpin: 'HAIRPIN',
@@ -114,8 +115,11 @@ export class Hud {
   private driftFade = 0;
   fps = 0;
 
-  constructor(root: HTMLElement) {
-    root.innerHTML = `
+  /** HUD size factor: on windows smaller than 1920x1080 (display scaling, browser zoom, small screens) the HUD shrinks to keep its 1080p proportions */
+  scale = 1;
+
+  constructor(private root: HTMLElement) {
+    root.innerHTML = `<div class="hud-ui">
       <div class="hud-top"></div>
       <div class="hud-help">
         <div><kbd>W</kbd><kbd>S</kbd> throttle / brake-reverse &nbsp; <kbd>A</kbd><kbd>D</kbd> steer</div>
@@ -147,7 +151,9 @@ export class Hud {
         <div class="v">0</div><div class="u">KM/H</div>
         <div class="g">GEAR <b>1</b></div>
         <div class="hud-rpm"><div></div></div>
-      </div>`;
+      </div></div>`;
+    this.fit();
+    addEventListener('resize', () => this.fit());
     this.speed = root.querySelector('.hud-speed .v')!;
     this.gear = root.querySelector('.hud-speed .g b')!;
     this.rpm = root.querySelector('.hud-rpm > div')!;
@@ -355,7 +361,7 @@ export class Hud {
         html += '<div class="slot empty"></div>';
         continue;
       }
-      html += `<div class="slot${i === sel ? ' active' : ''}" style="--c:${POWERS[k].color}"><img src="${powerIconUrl(k)}" alt=""><span class="nm">${POWERS[k].name}</span>${i === sel ? '<kbd>E</kbd>' : ''}</div>`;
+      html += `<div class="slot${i === sel ? ' active' : ''}" style="--c:${POWERS[k].color}"><img src="${powerIconUrl(k, 128)}" alt=""><span class="nm">${POWERS[k].name}</span>${i === sel ? '<kbd>E</kbd>' : ''}</div>`;
     }
     this.slotsEl.innerHTML = html;
   }
@@ -419,6 +425,11 @@ export class Hud {
       }
       if (this.driftFade <= 0) this.drift.classList.remove('show');
     }
+  }
+
+  private fit() {
+    this.scale = clamp(Math.min(innerWidth / 1920, innerHeight / 1080), 0.5, 1);
+    this.root.style.setProperty('--ui', String(this.scale));
   }
 
   update(dt: number, v: Vehicle, quality: Quality, trackName: string, drawCalls: number, scale = 1, autoRes = true) {

@@ -99,9 +99,14 @@ export function buildCity(def: TrackDef, cl: Centerline, mats: WorldMaterials, f
   streetMesh.receiveShadow = true;
   group.add(streetMesh);
 
-  // big ground plane under everything (beyond the city edge)
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000).rotateX(-Math.PI / 2), mats.street);
-  ground.position.set(downtown.x, -0.03, downtown.y);
+  // big ground plane under everything (beyond the city edge). Subdivided: as two 9 km triangles its
+  // depth came out a few cm wrong near the camera, and it showed through the streets and the track
+  // as a flat pale patch. UVs in 3 m tiles like the streets.
+  const groundGeo = new THREE.PlaneGeometry(9000, 9000, 64, 64).rotateX(-Math.PI / 2);
+  const guv = groundGeo.getAttribute('uv') as THREE.BufferAttribute;
+  for (let i = 0; i < guv.count; i++) guv.setXY(i, guv.getX(i) * 3000, guv.getY(i) * 3000);
+  const ground = new THREE.Mesh(groundGeo, mats.street);
+  ground.position.set(downtown.x, -0.05, downtown.y);
   ground.receiveShadow = true;
   group.add(ground);
 

@@ -177,6 +177,7 @@ export class Game {
     this.hud.onResume = () => this.setPaused(false);
     this.hud.onOnline = (a, v) => this.onlineAction(a, v);
     this.tagLayer = document.createElement('div');
+    this.tagLayer.className = 'hud-tags';
     hudRoot.appendChild(this.tagLayer);
     if (this.shotMode) document.body.classList.add('shot');
     (window as unknown as { __game: Game }).__game = this;
@@ -1400,7 +1401,9 @@ export class Game {
   private tagV = new THREE.Vector3();
   private updateTags() {
     if (!this.tags.size) return;
-    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    // the tag layer is zoomed like the HUD: positions in its (smaller) pixels
+    const k = this.hud.scale;
+    const w = this.canvas.clientWidth / k, h = this.canvas.clientHeight / k;
     const cam = this.camera.position;
     for (const [i, el] of this.tags) {
       const rc = this.racers[i];

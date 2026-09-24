@@ -24,6 +24,8 @@ body { font-family: 'Rajdhani', 'Segoe UI', sans-serif; color: var(--ink); user-
 #loading .status { margin-top: 12px; color: var(--muted); letter-spacing: 0.12em; font-size: 14px; text-transform: uppercase; }
 
 #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+/* --ui (set by Hud.fit): the whole HUD shrinks on small windows (display scaling 125-150%, browser zoom) */
+.hud-ui, .hud-tags { position: absolute; inset: 0; zoom: var(--ui, 1); }
 .hud-speed { position: absolute; right: 42px; bottom: 34px; text-align: right; text-shadow: 0 2px 12px rgba(0,0,0,0.6); }
 .hud-speed .v { font-size: 88px; font-weight: 700; line-height: 0.8; font-variant-numeric: tabular-nums; }
 .hud-speed .u { font-size: 16px; color: var(--muted); letter-spacing: 0.25em; }
@@ -135,7 +137,7 @@ body { font-family: 'Rajdhani', 'Segoe UI', sans-serif; color: var(--ink); user-
 /* results */
 .hud-results { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: auto; background: radial-gradient(ellipse at center, rgba(0,0,0,0.25), rgba(0,0,0,0.65)); }
 .hud-results.show { display: flex; }
-.hud-results .panel { max-height: calc(100vh - 24px); overflow-y: auto; background: rgba(10,11,14,0.86); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 26px 34px 30px; min-width: 520px; max-width: 760px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+.hud-results .panel { max-height: calc(100vh / var(--ui, 1) - 24px); overflow-y: auto; background: rgba(10,11,14,0.86); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 26px 34px 30px; min-width: 520px; max-width: 760px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
 .hud-results .title { font-size: 54px; font-weight: 700; letter-spacing: 0.1em; margin-bottom: 12px; }
 .hud-results .title span { font-size: 24px; vertical-align: top; margin: 0 10px 0 2px; color: var(--accent); }
 .hud-results table { width: 100%; border-collapse: collapse; font-size: 18px; letter-spacing: 0.05em; }

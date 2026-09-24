@@ -2,7 +2,8 @@
 export type Quality = 'low' | 'medium' | 'high';
 
 export interface GraphicsPreset {
-  pixelRatio: number; // cap of devicePixelRatio
+  pixelRatio: number; // cap of devicePixelRatio (screens with more real pixels: up to pixelBudget)
+  pixelBudget: number; // megapixels rendered at most on screens with several real pixels per CSS pixel
   renderScale: number; // starting resolution scale (auto resolution may lower it)
   shadowMapSize: number;
   shadowDistance: number; // metres covered by the sun shadow map
@@ -25,19 +26,19 @@ export interface GraphicsPreset {
 
 export const PRESETS: Record<Quality, GraphicsPreset> = {
   low: {
-    pixelRatio: 1, renderScale: 0.85, shadowMapSize: 1024, shadowDistance: 80, msaa: 0, smaa: true,
+    pixelRatio: 1, pixelBudget: 2.1, renderScale: 0.85, shadowMapSize: 1024, shadowDistance: 80, msaa: 0, smaa: true,
     ao: false, aoHalfRes: true, aoQuality: 'Performance', bloom: true, motionBlur: false, dynamicReflections: false,
     treeDensity: 0.4, treeDistance: 240, treeShadows: false, propDensity: 0.5, drawDistance: 1300, particles: 200,
     facadeDetail: 'low',
   },
   medium: {
-    pixelRatio: 1, renderScale: 1, shadowMapSize: 2048, shadowDistance: 120, msaa: 0, smaa: true,
+    pixelRatio: 1, pixelBudget: 2.1, renderScale: 1, shadowMapSize: 2048, shadowDistance: 120, msaa: 0, smaa: true,
     ao: true, aoHalfRes: true, aoQuality: 'Low', bloom: true, motionBlur: true, dynamicReflections: false,
     treeDensity: 0.7, treeDistance: 380, treeShadows: true, propDensity: 0.8, drawDistance: 2000, particles: 400,
     facadeDetail: 'high',
   },
   high: {
-    pixelRatio: 1.25, renderScale: 1, shadowMapSize: 2048, shadowDistance: 160, msaa: 2, smaa: true,
+    pixelRatio: 1.25, pixelBudget: 3.7, renderScale: 1, shadowMapSize: 2048, shadowDistance: 160, msaa: 2, smaa: true,
     ao: true, aoHalfRes: true, aoQuality: 'Medium', bloom: true, motionBlur: true, dynamicReflections: true,
     treeDensity: 1, treeDistance: 520, treeShadows: true, propDensity: 1, drawDistance: 2800, particles: 700,
     facadeDetail: 'high',

@@ -71,7 +71,7 @@ export class Pipeline {
     this.look = look;
     this.composer?.dispose();
     const r = this.renderer;
-    r.setPixelRatio(Math.min(devicePixelRatio, preset.pixelRatio) * preset.renderScale * this.scale);
+    r.setPixelRatio(this.pixelRatio());
     r.toneMappingExposure = look.exposure;
 
     const composer = new EffectComposer(r, {
@@ -158,8 +158,6 @@ export class Pipeline {
     if (this.pendingScale !== null) {
       this.scale = this.pendingScale;
       this.pendingScale = null;
-      const p = this.preset;
-      this.renderer.setPixelRatio(Math.min(devicePixelRatio, p.pixelRatio) * p.renderScale * this.scale);
       this.pendingResize = true;
     }
     if (this.pendingResize) {
@@ -168,9 +166,23 @@ export class Pipeline {
     }
   }
 
+  /**
+   * Render pixels per CSS pixel. Windows display scaling, browser zoom and HiDPI screens have
+   * more than one real pixel per CSS pixel: render at the real resolution, up to the preset's
+   * pixel budget (so a 4K screen still renders about 1080p on Medium), then auto resolution.
+   */
+  private pixelRatio() {
+    const p = this.preset;
+    const c = this.renderer.domElement;
+    const css = (c.clientWidth || innerWidth) * (c.clientHeight || innerHeight);
+    const fit = Math.sqrt((p.pixelBudget * 1e6) / Math.max(1, css));
+    return Math.min(devicePixelRatio || 1, Math.max(p.pixelRatio, fit)) * p.renderScale * this.scale;
+  }
+
   resize() {
     const c = this.renderer.domElement;
     const w = c.clientWidth || innerWidth, h = c.clientHeight || innerHeight;
+    this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.setSize(w, h, false);
     this.composer.setSize(w, h, false);
     this.camera.aspect = w / h;
