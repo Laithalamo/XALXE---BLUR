@@ -22,6 +22,14 @@ export interface LookParams {
   toneMapping: 'agx' | 'aces' | 'neutral';
 }
 
+// three r18x rotates its 5-tap PCF kernel with per-pixel noise (meant for TAA).
+// Without TAA that shows up as speckle in soft/dappled shadows, so use a fixed
+// rotation and a slightly wider kernel instead.
+THREE.ShaderChunk.shadowmap_pars_fragment = THREE.ShaderChunk.shadowmap_pars_fragment.replaceAll(
+  'float phi = interleavedGradientNoise( gl_FragCoord.xy ) * PI2;',
+  'float phi = 0.785;',
+);
+
 /** Renderer + post-processing chain: AO -> motion blur -> bloom/tonemap/grade -> SMAA. */
 export class Pipeline {
   readonly renderer: THREE.WebGLRenderer;

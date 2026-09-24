@@ -37,11 +37,11 @@ export const THEMES: Record<TrackTheme, ThemeDef> = {
     sunElevation: 0.8,
     sunColor: 0xfff0dc,
     sunIntensity: 5.2,
-    zenith: 0x2f69c4,
-    horizon: 0xb4cbe3,
+    zenith: 0x1d58bd,
+    horizon: 0xa7c1de,
     ground: 0x6f7378,
     fogDensity: 0.00055,
-    cloudCover: 0.5,
+    cloudCover: 0.54,
     cloudBrightness: 1.9,
     look: {
       exposure: 0.95,
@@ -182,6 +182,7 @@ export class Environment {
     this.sun.castShadow = true;
     this.sun.shadow.bias = -0.00025;
     this.sun.shadow.normalBias = 0.035;
+    this.sun.shadow.radius = 1.6;
     scene.add(this.sun, this.sun.target);
 
     const mat = new THREE.ShaderMaterial({

@@ -58,8 +58,8 @@ export class ChaseCamera {
     this.dir.lerp(target, damp(4.5, dt)).normalize();
 
     const far = this.mode === 'far';
-    const dist = (far ? 8.4 : 6.1) + clamp(kmh / 300, 0, 1) * 1.1;
-    const height = far ? 2.6 : 1.85;
+    const dist = (far ? 8.4 : 5.7) + clamp(kmh / 300, 0, 1) * 1.1;
+    const height = far ? 2.6 : 1.7;
     const desired = carPos.clone().addScaledVector(this.dir, -dist).addScaledVector(up, height);
     const lookAt = carPos.clone().addScaledVector(up, 1.0).addScaledVector(this.dir, 2.5);
     if (this.first) {

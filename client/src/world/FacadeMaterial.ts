@@ -27,10 +27,11 @@ uniform sampler2D uPlasterN;
 uniform sampler2D uConc;
 uniform sampler2D uConcN;
 uniform float uNight;
+uniform sampler2D uSigns;
 varying vec2 vFac;
-varying vec4 vStyle;
-varying vec4 vWall;
-varying vec3 vTint;
+flat varying vec4 vStyle;
+flat varying vec4 vWall;
+flat varying vec3 vTint;
 varying vec3 vWNormal;
 
 float fGlass;      // 1 = glass pixel
@@ -40,6 +41,7 @@ vec3 fInterior;    // interior-mapped room colour (emissive-ish)
 vec3 fWallN;       // tangent-space normal of the wall material
 float fWallRough;
 float fStyle;
+float fSign;
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -91,24 +93,31 @@ vec3 roomColor(vec2 cellPos, vec2 cellSize, vec2 cellId, float seed, vec3 Tw, ve
   float lit = step(r, vWall.w);
   float dayLevel = 0.1 + 0.1 * lit;
   float nightLevel = lit * (0.9 + 0.8 * r2);
+  if (cellId.y < -0.5) {
+    // ground-floor shops: always lit, warm, with colourful merchandise
+    vec3 goods = 0.5 + 0.5 * cos(6.2831 * (vec3(0.0, 0.33, 0.67) + r2 * 3.0 + floor(hp.x / 0.8) * 0.13));
+    if (t == tv.z && hp.y > 0.4 && hp.y < 2.2) col = mix(col, goods * 0.6, 0.55 * step(0.35, fract(hp.x / 0.8)));
+    return col * vec3(1.0, 0.92, 0.8) * mix(0.55, 1.6, uNight);
+  }
   return col * mix(dayLevel, nightLevel, uNight);
 }
 `;
 
 const MAP = /* glsl */ `
-  fGlass = 0.0; fFrame = 0.0; fRecess = 0.0; fInterior = vec3(0.0); fWallRough = 0.85;
+  fGlass = 0.0; fFrame = 0.0; fRecess = 0.0; fInterior = vec3(0.0); fWallRough = 0.85; fSign = 0.0;
   vec3 Nw = normalize(vWNormal);
   vec3 Tw = normalize(vec3(Nw.z, 0.0, -Nw.x));
   float style = floor(vStyle.x + 0.5);
   fStyle = style;
   float floorH = vStyle.y;
-  float seed = vStyle.w;
+  float seed = floor(vStyle.w + 0.5);
   float wallLen = vWall.x;
   float height = vWall.y;
   float groundH = vWall.z;
   vec2 f = vFac;
   bool isWall = Nw.y < 0.5;
   vec2 fw = max(fwidth(f), vec2(0.0005)) * 0.75;
+  vec2 dfx = dFdx(f), dfy = dFdy(f); // taken in uniform control flow for textureGrad below
 
   // wall material
   vec3 wallAlb;
@@ -175,12 +184,16 @@ const MAP = /* glsl */ `
       albedo = mix(albedo, vTint * 0.35, sp * 0.9);
       fWallRough = mix(fWallRough, 0.12, sp);
     }
-    // shop sign band
+    // shop sign band (fictional shop names from the sign atlas)
+    fSign = 0.0;
     if (ground && !edge && cy > groundH - 1.0 && cy < groundH - 0.25) {
-      float sh = hash12(vec2(bx, seed * 13.0));
-      vec3 signC = sh < 0.25 ? vec3(0.5, 0.05, 0.04) : sh < 0.5 ? vec3(0.03, 0.1, 0.25) : sh < 0.75 ? vec3(0.08, 0.08, 0.08) : vec3(0.55, 0.45, 0.2);
-      albedo = signC;
-      fWallRough = 0.4;
+      float sh = floor(hash12(vec2(bx, seed * 13.0)) * 16.0);
+      vec2 cellUv = vec2(clamp((cx - 0.1) / (bay - 0.2), 0.0, 1.0), (cy - (groundH - 1.0)) / 0.75);
+      vec2 suv = vec2((mod(sh, 2.0) + cellUv.x) / 2.0, 1.0 - (floor(sh / 2.0) + 1.0 - cellUv.y) / 8.0);
+      vec2 sScale = vec2((bay - 0.2) * 2.0, 0.75 * 8.0);
+      albedo = textureGrad(uSigns, suv, dfx / sScale, dfy / sScale).rgb;
+      fWallRough = 0.35;
+      fSign = 1.0;
     }
     // stone sill under punched windows
     if (style > 1.5 && !ground && !top && !edge) {
@@ -201,7 +214,9 @@ const MAP = /* glsl */ `
       if (!ground && bl > 0.86) {
         float level = hi.y - (hi.y - lo.y) * (0.25 + 0.6 * fract(bl * 13.0));
         if (cy > level) {
-          float slat = 0.75 + 0.25 * step(0.5, fract(cy / 0.06));
+          // anti-aliased slats: fade to the average when they get smaller than a pixel
+          float slatAA = clamp((fw.y - 0.004) * 90.0, 0.0, 1.0);
+          float slat = mix(0.75 + 0.25 * smoothstep(0.35, 0.65, fract(cy / 0.06)), 0.87, slatAA);
           fInterior = vec3(0.0);
           albedo = mix(albedo, vec3(0.62, 0.6, 0.56) * slat, inGlass);
           fGlass *= 0.15;
@@ -231,7 +246,9 @@ const NORMAL = /* glsl */ `
     if (Nw2.y < 0.5) {
       vec3 Tw2 = normalize(vec3(Nw2.z, 0.0, -Nw2.x));
       vec3 n = fWallN;
-      n.xy *= (1.0 - fGlass) * (1.0 - fFrame) * 0.9;
+      // no bumps on glass/frames/signs; fade bumps with distance to avoid sparkle
+      vec2 fwN = fwidth(vFac);
+      n.xy *= (1.0 - fGlass) * (1.0 - fFrame) * (1.0 - fSign) * 0.9 * clamp(1.0 - max(fwN.x, fwN.y) * 12.0, 0.15, 1.0);
       vec3 nWorld = normalize(Tw2 * n.x + vec3(0.0, 1.0, 0.0) * n.y + Nw2 * n.z);
       normal = normalize((viewMatrix * vec4(nWorld, 0.0)).xyz);
     }
@@ -244,10 +261,11 @@ const EMISSIVE = /* glsl */ `
     float fres = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
     float see = fStyle < 0.5 ? 0.45 : 1.0;
     totalEmissiveRadiance += fInterior * fGlass * (1.0 - fres) * see * (1.0 - fRecess * 0.5);
+    totalEmissiveRadiance += diffuseColor.rgb * fSign * mix(0.15, 1.8, uNight);
   }
 `;
 
-export async function createFacadeMaterial(assets: Assets, noise: THREE.Texture) {
+export async function createFacadeMaterial(assets: Assets, noise: THREE.Texture, signs: THREE.Texture) {
   const [brick, plaster, conc] = await Promise.all([assets.pbr('bricks'), Promise.all([
     assets.texture('textures/plaster_albedo.jpg', { srgb: true }),
     assets.texture('textures/plaster_normal.jpg'),
@@ -262,12 +280,13 @@ export async function createFacadeMaterial(assets: Assets, noise: THREE.Texture)
     uConc: { value: conc.map },
     uConcN: { value: conc.normal },
     uNight: { value: 0 },
+    uSigns: { value: signs },
   };
   patch(mat, {
     uniforms,
     vertexHead: /* glsl */ `
       attribute vec4 aStyle; attribute vec4 aWall; attribute vec3 aTint;
-      varying vec2 vFac; varying vec4 vStyle; varying vec4 vWall; varying vec3 vTint; varying vec3 vWNormal;`,
+      varying vec2 vFac; flat varying vec4 vStyle; flat varying vec4 vWall; flat varying vec3 vTint; varying vec3 vWNormal;`,
     vertexBody: 'vFac = uv; vStyle = aStyle; vWall = aWall; vTint = aTint; vWNormal = normalize(mat3(modelMatrix) * objectNormal);',
     fragmentHead: HEAD,
     replace: [

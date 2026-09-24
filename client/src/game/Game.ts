@@ -17,6 +17,7 @@ import { buildCity } from '../world/City';
 import { buildTrackView } from '../world/TrackView';
 import { buildProps } from '../world/Props';
 import { CarView } from '../vehicle/CarView';
+import { makeShopSignAtlas } from '../world/banners';
 import { ChaseCamera } from '../vehicle/ChaseCamera';
 import { Hud } from '../ui/Hud';
 import { Effects } from '../fx/Effects';
@@ -75,7 +76,7 @@ export class Game {
     const [mats] = await Promise.all([createWorldMaterials(this.assets)]);
     this.env = new Environment(this.scene, r, mats.noise);
     const [facade] = await Promise.all([
-      createFacadeMaterial(this.assets, mats.noise),
+      createFacadeMaterial(this.assets, mats.noise, makeShopSignAtlas()),
       this.env.load(theme, preset.shadowMapSize, preset.shadowDistance),
     ]);
     facade.uniforms.uNight.value = this.def.theme === 'night' ? 1 : 0;

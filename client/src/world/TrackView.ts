@@ -110,6 +110,19 @@ export function buildTrackView(def: TrackDef, cl: Centerline, mats: WorldMateria
       band(s, s + 1.2, l0, l1, k % 2 ? white : red, 1.2);
     }
   }
+  // zebra crossings where the circuit runs straight through a city intersection
+  const G = def.grid;
+  for (let gx = def.city.minX; gx <= def.city.maxX + 1; gx++) {
+    for (let gy = def.city.minY; gy <= def.city.maxY + 1; gy++) {
+      const pr = cl.project(gx * G, gy * G);
+      if (Math.abs(pr.lateral) > 0.8) continue;
+      if (corners.some((c) => pr.s > c.s0 - 25 && pr.s < c.s1 + 25)) continue;
+      if (Math.abs(pr.s) < 30 || Math.abs(pr.s - L) < 30) continue; // keep the grid area clean
+      for (const off of [-10.4, 10.4]) {
+        for (let l = -hw + 1.0; l <= hw - 1.4; l += 1.0) band(pr.s + off - 1.5, pr.s + off + 1.5, l + 0.5, l, white, 3);
+      }
+    }
+  }
   const paintMesh = new THREE.Mesh(paint.build(), mats.paint);
   fixUpFacing(paintMesh.geometry);
   paintMesh.receiveShadow = true;
@@ -223,6 +236,7 @@ export function buildTrackView(def: TrackDef, cl: Centerline, mats: WorldMateria
   group.add(boardMesh);
 
   group.add(buildGantry(cl, hw, mats, atlas));
+  group.add(manholes(cl, hw));
   return { group, corners };
 }
 
@@ -326,4 +340,40 @@ function fixFacingByNormal(g: THREE.BufferGeometry) {
     }
   }
   idx.needsUpdate = true;
+}
+
+/** cast-iron manhole covers and drain grates scattered on the circuit */
+function manholes(cl: Centerline, hw: number) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#808080';
+  g.fillRect(0, 0, 256, 256);
+  g.fillStyle = '#9a9a9a';
+  g.beginPath(); g.arc(128, 128, 122, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#5a5a5a';
+  g.lineWidth = 7;
+  for (let r = 30; r < 120; r += 22) { g.beginPath(); g.arc(128, 128, r, 0, Math.PI * 2); g.stroke(); }
+  for (let a = 0; a < 12; a++) {
+    g.beginPath(); g.moveTo(128, 128); g.lineTo(128 + Math.cos(a * 0.5236) * 118, 128 + Math.sin(a * 0.5236) * 118); g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x3a3632, roughness: 0.55, metalness: 0.75, bumpMap: tex, bumpScale: 1.2,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
+  });
+  const geo = new THREE.CircleGeometry(0.34, 24).rotateX(-Math.PI / 2);
+  const spots: THREE.Matrix4[] = [];
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let s = 25; s < cl.length; s += 35 + rnd() * 40) {
+    const p = cl.at(s);
+    const lat = (rnd() - 0.5) * (hw * 2 - 3);
+    spots.push(new THREE.Matrix4().makeTranslation(p.x + p.tz * lat, ROAD_Y + 0.006, p.z - p.tx * lat));
+  }
+  const m = new THREE.InstancedMesh(geo, mat, spots.length);
+  spots.forEach((mm, i) => m.setMatrixAt(i, mm));
+  m.receiveShadow = true;
+  m.name = 'manholes';
+  return m;
 }

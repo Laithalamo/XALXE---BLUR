@@ -293,7 +293,7 @@ function addBuilding(
   else if (style === 1) tint = srgbToLinear(R.pick(STONE));
   else if (style === 2) tint = new THREE.Color(1, 1, 1).multiplyScalar(R.range(0.8, 1.1)).lerp(new THREE.Color(1, 0.85, 0.75), R.range(0, 0.4));
   else tint = srgbToLinear(R.pick(PLASTER));
-  const seed = R.range(0, 100);
+  const seed = R.int(0, 997);
   const lit = R.range(0.25, 0.65);
 
   // setbacks from lot edges that face the street are zero; small gaps between neighbours
@@ -329,7 +329,21 @@ function addBuilding(
   } else {
     addBox(x0, z0, x1, z1, 0, height, groundH);
     roofStuff(c, R, x0, z0, x1, z1, height, style);
+    if (style >= 1) {
+      const out = style === 1 ? 0.18 : 0.42;
+      const th = style === 1 ? 0.35 : 0.7;
+      ledge(c.roofProps, x0, z0, x1, z1, height - th, height, out);
+      if (style >= 2) ledge(c.roofProps, x0, z0, x1, z1, groundH - 0.05, groundH + 0.28, 0.16);
+    }
   }
+}
+
+/** a protruding band around a building (cornice / belt course) */
+function ledge(b: GeoBuilder, x0: number, z0: number, x1: number, z1: number, y0: number, y1: number, out: number) {
+  b.box(new THREE.Vector3(x0 - out, y0, z0 - out), new THREE.Vector3(x1 + out, y1, z0 + 0.02), 1, {}, false);
+  b.box(new THREE.Vector3(x0 - out, y0, z1 - 0.02), new THREE.Vector3(x1 + out, y1, z1 + out), 1, {}, false);
+  b.box(new THREE.Vector3(x0 - out, y0, z0 + 0.02), new THREE.Vector3(x0 + 0.02, y1, z1 - 0.02), 1, {}, false);
+  b.box(new THREE.Vector3(x1 - 0.02, y0, z0 + 0.02), new THREE.Vector3(x1 + out, y1, z1 - 0.02), 1, {}, false);
 }
 
 /** four facade walls of a box, with facade attributes */
