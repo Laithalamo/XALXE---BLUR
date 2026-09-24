@@ -4,6 +4,7 @@ import type { Centerline } from '@shared/track/centerline';
 import { rng as makeRng, type Rng } from '@shared/math';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GeoBuilder } from './geom';
+import { cutBlock, addPlatform, pointInPoly, type RoadEdge } from './blockCut';
 import type { WorldMaterials } from './materials';
 import type { GraphicsPreset } from '../core/Settings';
 
@@ -62,6 +63,13 @@ export function buildCity(def: TrackDef, cl: Centerline, mats: WorldMaterials, f
     }
     return Math.sqrt(best);
   };
+
+  // both road edges, for trimming block corners where the circuit's rounded corners cut in
+  const hw = def.roadWidth / 2;
+  const roadEdges: RoadEdge[] = ([1, -1] as const).map((side) => ({
+    pts: cl.samples.map((p) => ({ x: p.x + p.tz * hw * side, z: p.z - p.tx * hw * side })),
+    out: cl.samples.map((p) => ({ x: p.tz * side, z: -p.tx * side })),
+  }));
 
   const ring = 3; // extra blocks around the listed city for the skyline
   const bx0 = def.city.minX - ring, bx1 = def.city.maxX + ring;
@@ -193,15 +201,26 @@ export function buildCity(def: TrackDef, cl: Centerline, mats: WorldMaterials, f
         buildPark(c.grass, c.pavers, props, pr, x0, z0, x1, z1, trackDist, preset);
         continue;
       }
-      // raised sidewalk platform + kerb ring
-      flatQuad(c.pavers, x0 + 0.25, z0 + 0.25, x1 - 0.25, z1 - 0.25, KERB_H, 2);
-      for (const [a0, b0, a1, b1] of [[x0, z0, x1, z0 + 0.25], [x0, z1 - 0.25, x1, z1], [x0, z0 + 0.25, x0 + 0.25, z1 - 0.25], [x1 - 0.25, z0 + 0.25, x1, z1 - 0.25]]) {
-        c.curb.box(new THREE.Vector3(a0, 0, b0), new THREE.Vector3(a1, KERB_H + 0.01, b1), 0.5);
+      // raised sidewalk platform + kerb ring (trimmed where a rounded track corner cuts in)
+      const outline = td < G ? cutBlock(x0, z0, x1, z1, roadEdges) : null;
+      if (outline) addPlatform(c.pavers, c.curb, outline, KERB_H);
+      else {
+        flatQuad(c.pavers, x0 + 0.25, z0 + 0.25, x1 - 0.25, z1 - 0.25, KERB_H, 2);
+        for (const [a0, b0, a1, b1] of [[x0, z0, x1, z0 + 0.25], [x0, z1 - 0.25, x1, z1], [x0, z0 + 0.25, x0 + 0.25, z1 - 0.25], [x1 - 0.25, z0 + 0.25, x1, z1 - 0.25]]) {
+          c.curb.box(new THREE.Vector3(a0, 0, b0), new THREE.Vector3(a1, KERB_H + 0.01, b1), 0.5);
+        }
       }
 
       // street furniture on sidewalks of detailed blocks
       if (detail === 0 || (detail === 1 && pr.chance(0.6))) {
+        const first = props.length;
         addSidewalkProps(props, pr, x0, z0, x1, z1, detail, preset, trackDist);
+        // nothing on the part of the corner that became road
+        if (outline) {
+          const keep = props.slice(first).filter((p) => pointInPoly(p, outline) && trackDist(p.x, p.z) > hw + 0.5);
+          props.length = first;
+          props.push(...keep);
+        }
       }
 
       // buildings

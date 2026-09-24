@@ -1,7 +1,43 @@
 import type { Vehicle } from '@shared/physics/vehicle';
+import type { Corner } from '@shared/track/corners';
 import type { Quality } from '../core/Settings';
 
-/** Minimal in-race HUD for the visual gate: speed, gear, rev bar, FPS, controls. */
+const SEVERITY_LABEL: Record<Corner['severity'], string> = {
+  kink: 'FLAT OUT', fast: 'FAST', medium: 'MEDIUM', sharp: 'SHARP', hairpin: 'HAIRPIN',
+};
+const SEVERITY_COLOR: Record<Corner['severity'], string> = {
+  kink: '#7dff9a', fast: '#c6ff5e', medium: '#ffd21f', sharp: '#ff8a1f', hairpin: '#ff3b30',
+};
+
+export interface RaceHudInfo {
+  position: number;
+  total: number;
+  lap: number;
+  laps: number;
+  lapTime: number;
+  bestLap: number | null;
+}
+
+export interface StandingRow {
+  name: string;
+  color: string;
+  isPlayer: boolean;
+}
+
+export interface ResultRow extends StandingRow {
+  /** finish time (s), null = still racing */
+  time: number | null;
+  best: number | null;
+}
+
+export const fmtTime = (t: number) => {
+  const m = Math.floor(t / 60), s = t - m * 60;
+  return `${m}:${s.toFixed(2).padStart(5, '0')}`;
+};
+
+const ordinal = (n: number) => (n % 10 === 1 && n !== 11 ? 'ST' : n % 10 === 2 && n !== 12 ? 'ND' : n % 10 === 3 && n !== 13 ? 'RD' : 'TH');
+
+/** In-race HUD: speed, gear, turn warnings, mini map slot, race info, drift score, toasts. */
 export class Hud {
   private speed: HTMLElement;
   private gear: HTMLElement;
@@ -9,21 +45,55 @@ export class Hud {
   private top: HTMLElement;
   private toastEl: HTMLElement;
   private help: HTMLElement;
+  private turn: HTMLElement;
+  private turnArrow: HTMLElement;
+  private turnText: HTMLElement;
+  private turnDist: HTMLElement;
+  private drift: HTMLElement;
+  private race: HTMLElement;
+  private raceEls: HTMLElement[];
+  private raceCache: string[] = [];
+  private stand: HTMLElement;
+  private standKey = '';
+  private results: HTMLElement;
+  private resultsKey = '';
+  private banner: HTMLElement;
+  /** results screen buttons */
+  onRestart: (() => void) | null = null;
+  onDifficulty: ((d: string) => void) | null = null;
+  readonly mapSlot: HTMLElement;
+  readonly slotsEl: HTMLElement;
   private toastTimer = 0;
+  private helpTimer = 14;
   private fpsAcc = 0;
   private fpsFrames = 0;
+  private driftShown = 0;
+  private driftFade = 0;
   fps = 0;
 
   constructor(root: HTMLElement) {
     root.innerHTML = `
       <div class="hud-top"></div>
-      <div class="hud-toast"></div>
       <div class="hud-help">
-        <div><kbd>W</kbd><kbd>S</kbd> throttle / brake-reverse</div>
-        <div><kbd>A</kbd><kbd>D</kbd> steer &nbsp; <kbd>Space</kbd> handbrake</div>
-        <div><kbd>Shift</kbd> test boost &nbsp; <kbd>R</kbd> reset car</div>
-        <div><kbd>C</kbd> camera &nbsp; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> graphics &nbsp; <kbd>F</kbd> auto-res &nbsp; <kbd>H</kbd> hide help</div>
+        <div><kbd>W</kbd><kbd>S</kbd> throttle / brake-reverse &nbsp; <kbd>A</kbd><kbd>D</kbd> steer</div>
+        <div><kbd>Space</kbd> handbrake → drift (hold throttle to keep it) &nbsp; <kbd>R</kbd> reset</div>
+        <div><kbd>E</kbd> use power-up &nbsp; <kbd>Q</kbd> next power-up &nbsp; <kbd>C</kbd> camera</div>
+        <div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> graphics &nbsp; <kbd>F</kbd> auto-res &nbsp; <kbd>H</kbd> help</div>
       </div>
+      <div class="hud-turn"><div class="arrow"></div><div class="txt"><div class="t1"></div><div class="t2"></div></div></div>
+      <div class="hud-race">
+        <div class="pos"><b></b><span></span><em></em></div>
+        <div class="lap">LAP <b></b><i></i></div>
+        <div class="time"></div>
+        <div class="best"></div>
+      </div>
+      <div class="hud-stand"></div>
+      <div class="hud-results"></div>
+      <div class="hud-banner"></div>
+      <div class="hud-toast"></div>
+      <div class="hud-drift"></div>
+      <div class="hud-mapslot"></div>
+      <div class="hud-slots"></div>
       <div class="hud-speed">
         <div class="v">0</div><div class="u">KM/H</div>
         <div class="g">GEAR <b>1</b></div>
@@ -35,16 +105,140 @@ export class Hud {
     this.top = root.querySelector('.hud-top')!;
     this.toastEl = root.querySelector('.hud-toast')!;
     this.help = root.querySelector('.hud-help')!;
+    this.turn = root.querySelector('.hud-turn')!;
+    this.turnArrow = root.querySelector('.hud-turn .arrow')!;
+    this.turnText = root.querySelector('.hud-turn .t1')!;
+    this.turnDist = root.querySelector('.hud-turn .t2')!;
+    this.drift = root.querySelector('.hud-drift')!;
+    this.race = root.querySelector('.hud-race')!;
+    this.raceEls = ['.pos b', '.pos span', '.pos em', '.lap b', '.lap i', '.time', '.best'].map((q) => this.race.querySelector(q)!);
+    this.stand = root.querySelector('.hud-stand')!;
+    this.results = root.querySelector('.hud-results')!;
+    this.results.addEventListener('click', (e) => {
+      const t = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
+      if (!t) return;
+      if (t.dataset.act === 'restart') this.onRestart?.();
+      else if (t.dataset.act === 'diff') this.onDifficulty?.(t.dataset.v!);
+    });
+    this.setRace(null);
+    this.banner = root.querySelector('.hud-banner')!;
+    this.mapSlot = root.querySelector('.hud-mapslot')!;
+    this.slotsEl = root.querySelector('.hud-slots')!;
   }
 
   toggleHelp() {
-    this.help.style.display = this.help.style.display === 'none' ? '' : 'none';
+    const hidden = this.help.style.display === 'none';
+    this.help.style.display = hidden ? '' : 'none';
+    this.helpTimer = hidden ? 1e9 : 0;
   }
 
-  toast(text: string) {
+  toast(text: string, seconds = 1.6) {
     this.toastEl.textContent = text;
     this.toastEl.classList.add('show');
-    this.toastTimer = 1.6;
+    this.toastTimer = seconds;
+  }
+
+  /** big centre text (countdown, FINISH...) — empty string hides it */
+  setBanner(text: string, color = '#ffffff') {
+    this.banner.textContent = text;
+    this.banner.style.color = color;
+    this.banner.classList.toggle('show', text.length > 0);
+  }
+
+  setRace(info: RaceHudInfo | null) {
+    if (!info) {
+      this.race.style.display = 'none';
+      this.stand.style.display = 'none';
+      return;
+    }
+    this.race.style.display = '';
+    this.stand.style.display = '';
+    // only touch the DOM when a value actually changes
+    const vals = [
+      String(info.position), ordinal(info.position), `/${info.total}`,
+      String(Math.min(info.lap, info.laps)), `/${info.laps}`,
+      fmtTime(info.lapTime), `BEST ${info.bestLap !== null ? fmtTime(info.bestLap) : '--:--.--'}`,
+    ];
+    for (let i = 0; i < vals.length; i++) {
+      if (this.raceCache[i] !== vals[i]) {
+        this.raceCache[i] = vals[i];
+        this.raceEls[i].textContent = vals[i];
+      }
+    }
+  }
+
+  /** race order list (leader first) */
+  setStandings(rows: StandingRow[]) {
+    const key = rows.map((r) => r.name).join('|');
+    if (key === this.standKey) return;
+    this.standKey = key;
+    this.stand.innerHTML = rows
+      .map((r, i) => `<div class="row${r.isPlayer ? ' me' : ''}"><b>${i + 1}</b><i style="background:${r.color}"></i>${r.name}</div>`)
+      .join('');
+  }
+
+  /** end-of-race table; null hides it. Updates live while the others finish. */
+  setResults(rows: ResultRow[] | null, difficulty = 'medium', playerPlace = 0) {
+    if (!rows) {
+      this.results.classList.remove('show');
+      // a focused (now hidden) button would still react to Space/Enter
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      return;
+    }
+    const leader = rows[0]?.time ?? null;
+    const body = rows
+      .map((r, i) => {
+        const t = r.time === null ? '<span class="racing">RACING…</span>' : i === 0 || leader === null ? fmtTime(r.time) : `+${(r.time - leader).toFixed(2)}`;
+        return `<tr class="${r.isPlayer ? 'me' : ''}"><td class="p">${i + 1}</td><td><i style="background:${r.color}"></i>${r.name}</td><td class="t">${t}</td><td class="t">${r.best !== null ? fmtTime(r.best) : '--'}</td></tr>`;
+      })
+      .join('');
+    const diffs = ['easy', 'medium', 'hard']
+      .map((d) => `<button data-act="diff" data-v="${d}" class="${d === difficulty ? 'on' : ''}">${d.toUpperCase()}</button>`)
+      .join('');
+    const html = `
+      <div class="panel">
+        <div class="title">${playerPlace}<span>${ordinal(playerPlace)}</span> PLACE</div>
+        <table><tr class="h"><td></td><td>DRIVER</td><td class="t">TIME</td><td class="t">BEST LAP</td></tr>${body}</table>
+        <div class="opts"><span>AI</span>${diffs}</div>
+        <button class="go" data-act="restart">RACE AGAIN <small>ENTER</small></button>
+      </div>`;
+    if (this.resultsKey !== html) {
+      this.resultsKey = html;
+      this.results.innerHTML = html;
+    }
+    this.results.classList.add('show');
+  }
+
+  /** upcoming corner warning; pass null to hide */
+  setTurn(corner: Corner | null, distance: number) {
+    if (!corner || distance > 230) {
+      this.turn.classList.remove('show');
+      return;
+    }
+    this.turn.classList.add('show');
+    const col = SEVERITY_COLOR[corner.severity];
+    this.turn.style.setProperty('--turn', col);
+    this.turnArrow.className = `arrow ${corner.dir > 0 ? 'left' : 'right'} ${corner.severity}`;
+    this.turnText.textContent = `${corner.dir > 0 ? 'LEFT' : 'RIGHT'} · ${SEVERITY_LABEL[corner.severity]}`;
+    this.turnDist.textContent = distance > 8 ? `${Math.round(distance / 10) * 10} m` : 'NOW';
+  }
+
+  /** drift score counter (Forza style), shows while drifting and briefly after */
+  setDrift(active: boolean, score: number, dt: number) {
+    if (active && score > 50) {
+      this.driftShown = score;
+      this.driftFade = 1.6;
+      this.drift.innerHTML = `DRIFT <b>${Math.round(score).toLocaleString()}</b>`;
+      this.drift.classList.add('show');
+      this.drift.classList.remove('banked');
+    } else if (this.driftFade > 0) {
+      this.driftFade -= dt;
+      if (!this.drift.classList.contains('banked') && this.driftShown > 50) {
+        this.drift.innerHTML = `+${Math.round(this.driftShown).toLocaleString()} <small>DRIFT</small>`;
+        this.drift.classList.add('banked');
+      }
+      if (this.driftFade <= 0) this.drift.classList.remove('show');
+    }
   }
 
   update(dt: number, v: Vehicle, quality: Quality, trackName: string, drawCalls: number, scale = 1, autoRes = true) {
@@ -64,6 +258,10 @@ export class Hud {
     if (this.toastTimer > 0) {
       this.toastTimer -= dt;
       if (this.toastTimer <= 0) this.toastEl.classList.remove('show');
+    }
+    if (this.helpTimer > 0 && this.helpTimer < 1e8) {
+      this.helpTimer -= dt;
+      if (this.helpTimer <= 0) this.help.style.display = 'none';
     }
   }
 }

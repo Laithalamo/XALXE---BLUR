@@ -3,7 +3,8 @@ import type { TrackDef } from '@shared/track/trackDefs';
 import type { Centerline } from '@shared/track/centerline';
 import { GeoBuilder } from './geom';
 import type { WorldMaterials } from './materials';
-import { makeBannerAtlas, BANNER_COUNT } from './banners';
+import { makeBannerAtlas, BANNER_COUNT, makeChevronTexture } from './banners';
+import { findCorners } from '@shared/track/corners';
 
 /**
  * Visual track: asphalt ribbon with lane data, race markings (start grid,
@@ -235,27 +236,11 @@ export function buildTrackView(def: TrackDef, cl: Centerline, mats: WorldMateria
   boardMesh.name = 'boards';
   group.add(boardMesh);
 
-  group.add(buildGantry(cl, hw, mats, atlas));
+  group.add(buildChevrons(cl, hw, corners));
+  const gantry = buildGantry(cl, hw, mats, atlas);
+  group.add(gantry);
   group.add(manholes(cl, hw));
-  return { group, corners };
-}
-
-/** find corners (curved sections) from curvature: returns s-range and turn direction (+1 = left) */
-export function findCorners(cl: Centerline) {
-  const out: { s0: number; s1: number; dir: number }[] = [];
-  let cur: { s0: number; s1: number; dir: number } | null = null;
-  for (const s of cl.samples) {
-    if (Math.abs(s.k) > 1 / 200) {
-      const dir = Math.sign(s.k);
-      if (!cur) cur = { s0: s.s, s1: s.s, dir };
-      cur.s1 = s.s;
-    } else if (cur) {
-      if (cur.s1 - cur.s0 > 5) out.push(cur);
-      cur = null;
-    }
-  }
-  if (cur && cur.s1 - cur.s0 > 5) out.push(cur);
-  return out;
+  return { group, corners, startLights: gantry.userData.startLights as THREE.MeshStandardMaterial[] };
 }
 
 function buildGantry(cl: Centerline, hw: number, mats: WorldMaterials, atlas: THREE.Texture) {
@@ -288,17 +273,22 @@ function buildGantry(cl: Centerline, hw: number, mats: WorldMaterials, atlas: TH
     if (side < 0) m.rotation.y = Math.PI;
     g.add(m);
   }
-  // start lights
-  const lightMat = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff1a0a, emissiveIntensity: 0.0, roughness: 0.3 });
+  // start lights: one material per lamp so the countdown can light them one by one
+  const lampGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.12, 16).rotateX(Math.PI / 2);
+  const lamps: THREE.MeshStandardMaterial[] = [];
   for (let k = 0; k < 5; k++) {
-    const l = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.12, 16).rotateX(Math.PI / 2), lightMat);
-    l.position.set(-1.2 + k * 0.6, 6.85, -0.25);
-    g.add(l);
+    const lightMat = new THREE.MeshStandardMaterial({ color: 0x1a0404, emissive: 0xff1a0a, emissiveIntensity: 0.0, roughness: 0.3 });
+    lamps.push(lightMat);
+    for (const side of [-1, 1]) {
+      const l = new THREE.Mesh(lampGeo, lightMat);
+      l.position.set(-1.2 + k * 0.6, 6.85, side * 0.25);
+      g.add(l);
+    }
   }
   const housing = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.7, 0.4), truss);
   housing.position.set(0, 6.85, 0.0);
   g.add(housing);
-  g.userData.startLights = lightMat;
+  g.userData.startLights = lamps;
   return g;
 }
 
@@ -376,4 +366,38 @@ function manholes(cl: Centerline, hw: number) {
   m.receiveShadow = true;
   m.name = 'manholes';
   return m;
+}
+
+/** yellow-on-black chevron boards on the outside of each corner, facing approaching cars */
+function buildChevrons(cl: Centerline, hw: number, corners: ReturnType<typeof findCorners>) {
+  const group = new THREE.Group();
+  group.name = 'chevrons';
+  const texL = makeChevronTexture(1), texR = makeChevronTexture(-1);
+  const make = (t: THREE.Texture) => new THREE.MeshStandardMaterial({
+    map: t, emissiveMap: t, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.5, side: THREE.DoubleSide,
+  });
+  const matL = make(texL), matR = make(texR);
+  const geo = new THREE.PlaneGeometry(2.2, 0.95);
+  const postGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.2, 8);
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x2a2d31, metalness: 0.7, roughness: 0.45 });
+  for (const c of corners) {
+    if (c.severity === 'kink') continue;
+    const outside = c.dir > 0 ? -1 : 1; // left turn -> boards on the right
+    const n = Math.max(3, Math.round((c.s1 - c.s0) / 7) + 2);
+    for (let k = 0; k < n; k++) {
+      const ss = c.s0 - 6 + ((c.s1 - c.s0 + 12) * k) / (n - 1);
+      const p = cl.at(ss);
+      const ox = p.tz * outside, oz = -p.tx * outside; // outward
+      const x = p.x + ox * (hw + 0.38), z = p.z + oz * (hw + 0.38);
+      const m = new THREE.Mesh(geo, c.dir > 0 ? matL : matR);
+      m.position.set(x, 1.62, z);
+      // face the approaching driver: mostly back along the track, a bit towards the road
+      m.lookAt(x - p.tx * 6 - ox * 3.5, 1.62, z - p.tz * 6 - oz * 3.5);
+      group.add(m);
+      const post = new THREE.Mesh(postGeo, postMat);
+      post.position.set(x, 1.1, z);
+      group.add(post);
+    }
+  }
+  return group;
 }

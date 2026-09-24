@@ -37,6 +37,8 @@ export interface CarSpec {
   id: string;
   name: string;
   model: string;
+  /** lighter models for AI opponents: [near, far] */
+  lodModels?: string[];
   unlockLevel: number;
   stats: { speed: number; acceleration: number; handling: number; health: number };
   maxHealth: number;
@@ -50,6 +52,7 @@ export const CARS: Record<string, CarSpec> = {
     id: 'ferrano458',
     name: 'Ferrano 458',
     model: 'models/cars/ferrano_458.glb',
+    lodModels: ['models/cars/ferrano_458_lod.glb', 'models/cars/ferrano_458_lod2.glb'],
     unlockLevel: 1,
     stats: { speed: 8, acceleration: 8, handling: 7, health: 5 },
     maxHealth: 100,
@@ -72,7 +75,7 @@ export const CARS: Record<string, CarSpec> = {
       highSpeedSteer: 0.12,
       grip: 1.55,
       rearGripBias: 0.97,
-      driftGrip: 0.42,
+      driftGrip: 0.22,
       suspension: { rest: 0.32, stiffness: 52000, damping: 5200, travel: 0.22 },
       antiRoll: 16000,
       downforce: 1.6,

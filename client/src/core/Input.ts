@@ -7,6 +7,7 @@ export class Input {
   private pressed = new Set<string>();
   readonly drive: DriveInput = { throttle: 0, brake: 0, steer: 0, handbrake: false, boost: false };
   enabled = true;
+  private padStart = false;
 
   constructor() {
     addEventListener('keydown', (e) => {
@@ -44,7 +45,10 @@ export class Input {
       handbrake ||= !!pad.buttons[0]?.pressed || !!pad.buttons[5]?.pressed;
       boost ||= !!pad.buttons[2]?.pressed;
       if (pad.buttons[3]?.pressed) this.pressed.add('KeyR');
-      if (pad.buttons[9]?.pressed) this.pressed.add('Escape');
+      // Start: menu / race again (edge-triggered: held buttons don't repeat)
+      const start = !!pad.buttons[9]?.pressed;
+      if (start && !this.padStart) { this.pressed.add('Escape'); this.pressed.add('Enter'); }
+      this.padStart = start;
     }
 
     if (!this.enabled) { throttle = 0; brake = 0; steerTarget = 0; handbrake = false; boost = false; analogSteer = null; }

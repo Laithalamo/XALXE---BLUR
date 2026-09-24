@@ -60,6 +60,9 @@ vec3 roomColor(vec2 cellPos, vec2 cellSize, vec2 cellId, float seed, vec3 Tw, ve
   vec3 V = normalize(vWPos - cameraPosition);
   vec3 rd = vec3(dot(V, Tw), V.y, -dot(V, Nw));
   rd.z = max(rd.z, 0.02);
+  // keep every component away from 0 so the slab test below can't produce 0/0 = NaN
+  rd.x = abs(rd.x) < 1e-4 ? 1e-4 : rd.x;
+  rd.y = abs(rd.y) < 1e-4 ? 1e-4 : rd.y;
   float depth = 5.5 + 3.0 * hash12(cellId + seed);
   vec3 size = vec3(cellSize, depth);
   vec3 ro = vec3(cellPos, 0.0);

@@ -34,10 +34,105 @@ body { font-family: 'Rajdhani', 'Segoe UI', sans-serif; color: var(--ink); user-
 .hud-top { position: absolute; left: 28px; top: 22px; font-size: 14px; color: var(--muted); letter-spacing: 0.12em; }
 .hud-top b { color: var(--ink); }
 .hud-help {
-  position: absolute; left: 28px; bottom: 28px; background: var(--panel); padding: 12px 16px; border-left: 3px solid var(--accent);
+  position: absolute; left: 28px; top: 250px; background: var(--panel); padding: 12px 16px; border-left: 3px solid var(--accent);
   font-size: 14px; line-height: 1.55; letter-spacing: 0.05em;
 }
 .hud-help kbd { display: inline-block; min-width: 22px; padding: 0 5px; margin-right: 6px; border: 1px solid #555a62; border-radius: 3px; text-align: center; font-family: inherit; font-size: 12px; color: var(--ink); }
 .hud-toast { position: absolute; left: 50%; top: 16%; transform: translateX(-50%); font-size: 26px; font-weight: 700; letter-spacing: 0.14em; opacity: 0; transition: opacity 0.3s; text-shadow: 0 2px 14px rgba(0,0,0,0.7); }
 .hud-toast.show { opacity: 1; }
 .shot .hud-help, .shot .hud-top { display: none; }
+
+/* upcoming turn */
+.hud-turn {
+  position: absolute; left: 50%; top: 26px; transform: translateX(-50%) translateY(-10px); display: flex; align-items: center; gap: 14px;
+  padding: 8px 20px 8px 14px; background: var(--panel); border-bottom: 3px solid var(--turn, #ffd21f); opacity: 0; transition: opacity 0.25s, transform 0.25s;
+}
+.hud-turn.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.hud-turn .arrow { width: 46px; height: 46px; position: relative; }
+.hud-turn .arrow::before {
+  content: ''; position: absolute; inset: 0; background: var(--turn, #ffd21f);
+  clip-path: polygon(38% 100%, 38% 45%, 18% 45%, 50% 5%, 82% 45%, 62% 45%, 62% 100%);
+  transform-origin: 50% 70%;
+}
+.hud-turn .arrow.left::before { transform: rotate(-55deg); }
+.hud-turn .arrow.right::before { transform: rotate(55deg); }
+.hud-turn .arrow.sharp.left::before, .hud-turn .arrow.hairpin.left::before { transform: rotate(-90deg); }
+.hud-turn .arrow.sharp.right::before, .hud-turn .arrow.hairpin.right::before { transform: rotate(90deg); }
+.hud-turn .arrow.kink.left::before { transform: rotate(-28deg); }
+.hud-turn .arrow.kink.right::before { transform: rotate(28deg); }
+.hud-turn .t1 { font-size: 22px; font-weight: 700; letter-spacing: 0.1em; color: var(--turn, #ffd21f); }
+.hud-turn .t2 { font-size: 15px; color: var(--ink); letter-spacing: 0.15em; }
+
+/* race info */
+.hud-race { position: absolute; right: 36px; top: 22px; text-align: right; text-shadow: 0 2px 10px rgba(0,0,0,0.6); }
+.hud-race .pos { font-size: 64px; font-weight: 700; line-height: 0.9; }
+.hud-race .pos span { font-size: 24px; vertical-align: top; margin-left: 2px; }
+.hud-race .pos em { font-style: normal; font-size: 26px; color: var(--muted); margin-left: 4px; }
+.hud-race .lap { font-size: 22px; letter-spacing: 0.12em; margin-top: 4px; }
+.hud-race .lap b { color: var(--accent); }
+.hud-race .time { font-size: 24px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.hud-race .best { font-size: 14px; color: var(--muted); letter-spacing: 0.1em; font-variant-numeric: tabular-nums; }
+
+/* countdown / finish */
+.hud-banner {
+  position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%) scale(0.8); font-size: 120px; font-weight: 700;
+  letter-spacing: 0.08em; opacity: 0; transition: opacity 0.2s, transform 0.2s; text-shadow: 0 6px 30px rgba(0,0,0,0.7);
+}
+.hud-banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+/* drift score */
+.hud-drift {
+  position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%); font-size: 30px; font-weight: 700; letter-spacing: 0.12em;
+  color: #ffd21f; opacity: 0; transition: opacity 0.3s; text-shadow: 0 3px 16px rgba(0,0,0,0.7);
+}
+.hud-drift.show { opacity: 1; }
+.hud-drift b { font-size: 40px; color: #fff; margin-left: 8px; }
+.hud-drift.banked { color: #7dff9a; }
+.hud-drift small { font-size: 18px; color: var(--ink); }
+
+/* mini map */
+.hud-mapslot { position: absolute; left: 26px; bottom: 26px; }
+.hud-map { display: block; filter: drop-shadow(0 4px 14px rgba(0,0,0,0.5)); }
+
+/* power-up slots */
+.hud-slots { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); display: flex; gap: 10px; }
+.hud-slots .slot {
+  width: 64px; height: 64px; border-radius: 10px; background: var(--panel); border: 2px solid rgba(255,255,255,0.18);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; letter-spacing: 0.08em; position: relative;
+}
+.hud-slots .slot.active { border-color: #fff; box-shadow: 0 0 18px rgba(255,255,255,0.35); }
+.hud-slots .slot .ico { width: 34px; height: 34px; border-radius: 50%; }
+.hud-slots .slot .nm { position: absolute; bottom: -18px; left: 0; right: 0; text-align: center; color: var(--ink); }
+
+
+/* race order list */
+.hud-stand { position: absolute; left: 26px; top: 56px; font-size: 15px; letter-spacing: 0.08em; text-shadow: 0 2px 8px rgba(0,0,0,0.7); }
+.hud-stand .row { display: flex; align-items: center; gap: 8px; height: 22px; padding: 0 10px 0 6px; color: var(--ink); }
+.hud-stand .row b { width: 16px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hud-stand .row i { width: 4px; height: 14px; border-radius: 2px; }
+.hud-stand .row.me { background: linear-gradient(90deg, rgba(232,32,42,0.55), rgba(232,32,42,0)); font-weight: 700; }
+.hud-stand .row.me b { color: #fff; }
+.shot .hud-stand { top: 22px; }
+
+/* results */
+.hud-results { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: auto; background: radial-gradient(ellipse at center, rgba(0,0,0,0.25), rgba(0,0,0,0.65)); }
+.hud-results.show { display: flex; }
+.hud-results .panel { background: rgba(10,11,14,0.86); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 26px 34px 30px; min-width: 520px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+.hud-results .title { font-size: 54px; font-weight: 700; letter-spacing: 0.1em; margin-bottom: 12px; }
+.hud-results .title span { font-size: 24px; vertical-align: top; margin: 0 10px 0 2px; color: var(--accent); }
+.hud-results table { width: 100%; border-collapse: collapse; font-size: 18px; letter-spacing: 0.05em; }
+.hud-results td { padding: 5px 8px; }
+.hud-results tr.h td { font-size: 12px; color: var(--muted); letter-spacing: 0.18em; }
+.hud-results td.p { width: 26px; color: var(--muted); font-weight: 700; }
+.hud-results td.t { text-align: right; font-variant-numeric: tabular-nums; }
+.hud-results td i { display: inline-block; width: 4px; height: 14px; border-radius: 2px; margin-right: 10px; vertical-align: -1px; }
+.hud-results tr.me { background: rgba(232,32,42,0.28); font-weight: 700; }
+.hud-results tr.me td.p { color: #fff; }
+.hud-results .racing { color: var(--muted); font-size: 14px; letter-spacing: 0.15em; }
+.hud-results .opts { display: flex; align-items: center; gap: 8px; margin-top: 20px; font-size: 13px; color: var(--muted); letter-spacing: 0.18em; }
+.hud-results button { font-family: inherit; font-size: 15px; font-weight: 700; letter-spacing: 0.12em; color: var(--ink); background: #1b1d22; border: 1px solid #343840; border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+.hud-results button:hover { border-color: #fff; }
+.hud-results .opts button.on { background: #fff; color: #000; border-color: #fff; }
+.hud-results .go { display: block; width: 100%; margin-top: 18px; padding: 12px; font-size: 20px; background: var(--accent); border-color: var(--accent); }
+.hud-results .go small { font-size: 12px; opacity: 0.7; margin-left: 8px; }
+.hud-race .lap i { font-style: normal; }

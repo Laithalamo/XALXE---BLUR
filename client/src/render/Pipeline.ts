@@ -138,11 +138,34 @@ export class Pipeline {
     }
   }
 
+  /**
+   * Resolution changes are only *requested* here and applied right before the
+   * next render: resizing a canvas clears it, and resizing after a frame was
+   * drawn made the browser show that empty (black) buffer for one frame.
+   */
+  private pendingScale: number | null = null;
+  private pendingResize = false;
+
   setScale(scale: number) {
-    this.scale = scale;
-    const p = this.preset;
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, p.pixelRatio) * p.renderScale * scale);
-    this.resize();
+    this.pendingScale = scale;
+  }
+
+  requestResize() {
+    this.pendingResize = true;
+  }
+
+  private applyPending() {
+    if (this.pendingScale !== null) {
+      this.scale = this.pendingScale;
+      this.pendingScale = null;
+      const p = this.preset;
+      this.renderer.setPixelRatio(Math.min(devicePixelRatio, p.pixelRatio) * p.renderScale * this.scale);
+      this.pendingResize = true;
+    }
+    if (this.pendingResize) {
+      this.pendingResize = false;
+      this.resize();
+    }
   }
 
   resize() {
@@ -155,6 +178,7 @@ export class Pipeline {
   }
 
   render(dt: number, blurStrength: number) {
+    this.applyPending();
     this.renderer.info.reset();
     if (this.preset.motionBlur) this.motionBlur.prepare(this.camera, blurStrength);
     const ca = 0.0012 * this.speedFx;

@@ -96,3 +96,26 @@ export function saveAutoRes(on: boolean) {
     /* storage blocked */
   }
 }
+
+const AI_KEY = 'xalxe.ai';
+export type AIDifficulty = 'easy' | 'medium' | 'hard';
+
+export function loadDifficulty(): AIDifficulty {
+  const url = new URLSearchParams(location.search).get('diff');
+  if (url === 'easy' || url === 'medium' || url === 'hard') return url;
+  try {
+    const v = localStorage.getItem(AI_KEY);
+    if (v === 'easy' || v === 'medium' || v === 'hard') return v;
+  } catch {
+    /* storage blocked */
+  }
+  return 'medium';
+}
+
+export function saveDifficulty(d: AIDifficulty) {
+  try {
+    localStorage.setItem(AI_KEY, d);
+  } catch {
+    /* storage blocked */
+  }
+}

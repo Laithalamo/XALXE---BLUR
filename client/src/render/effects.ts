@@ -35,7 +35,8 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   vec2 prevUv = pc.xy / pc.w * 0.5 + 0.5;
   vec2 vel = (uv - prevUv) * uStrength;
   float l = length(vel);
-  if (l < 0.0008) { outputColor = inputColor; return; }
+  // !(l < 10.0) also catches NaN (points behind last frame's camera)
+  if (l < 0.0008 || !(l < 10.0) || pc.w <= 0.0) { outputColor = inputColor; return; }
   if (l > uMaxBlur) vel *= uMaxBlur / l;
   vec3 acc = inputColor.rgb;
   float w = 1.0;
@@ -88,16 +89,24 @@ export class MotionBlurEffect extends Effect {
     const inv = u.get('uCarInv')!.value as THREE.Matrix4[];
     const prev = u.get('uCarPrev')!.value as THREE.Matrix4[];
     const half = u.get('uCarHalf')!.value as THREE.Vector3[];
+    // the shader handles 4 cars: the ones nearest the camera (the first tracked car, the
+    // player, always comes first); every car's history is kept so any of them can join later
+    const cam = camera.position;
+    const cand = this.cars.filter((c) => c.object.visible);
+    for (const c of cand) c.object.updateMatrixWorld();
+    const dist = (c: (typeof cand)[number]) => (c === this.cars[0] ? -1 : c.object.position.distanceToSquared(cam));
+    cand.sort((a, b) => dist(a) - dist(b));
     let n = 0;
-    for (const c of this.cars) {
+    for (const c of cand) {
       if (n >= 4) break;
-      c.object.updateMatrixWorld();
       inv[n].copy(c.object.matrixWorld).invert();
       prev[n].copy(c.has ? c.prev : c.object.matrixWorld);
       half[n].copy(c.half);
+      n++;
+    }
+    for (const c of this.cars) {
       c.prev.copy(c.object.matrixWorld);
       c.has = true;
-      n++;
     }
     u.get('uCarCount')!.value = n;
     this.prevViewProj.copy(vp);
@@ -107,6 +116,11 @@ export class MotionBlurEffect extends Effect {
   resetHistory() {
     this.hasPrev = false;
     for (const c of this.cars) c.has = false;
+  }
+
+  /** forget one car's previous transform (it teleported) */
+  resetCar(object: THREE.Object3D) {
+    for (const c of this.cars) if (c.object === object) c.has = false;
   }
 }
 

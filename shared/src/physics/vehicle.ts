@@ -58,6 +58,8 @@ export class Vehicle {
   /** forward speed, m/s (negative when reversing) */
   speed = 0;
   steerAngle = 0;
+  /** actual front wheel angle (player steering + counter-steer assist) */
+  wheelSteer = 0;
   rpm = IDLE_RPM;
   gear = 1;
   throttle = 0;
@@ -66,6 +68,15 @@ export class Vehicle {
   airborne = false;
   /** 0..1 how hard the car is sliding (for smoke / sound) */
   slide = 0;
+  /** 0..1 drift state (Forza-style assisted drift), and body slip angle in rad (+ = sliding left turn) */
+  drift = 0;
+  slipAngle = 0;
+  /** seconds spent in the current drift, and its angle-weighted score */
+  driftTime = 0;
+  driftScore = 0;
+  private prevBeta = 0;
+  private driftDir = 0;
+  private driftCooldown = 0;
 
   private tmp = { a: V.v3(), b: V.v3(), c: V.v3(), d: V.v3(), e: V.v3() };
   private up = V.v3();
@@ -133,6 +144,9 @@ export class Vehicle {
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.steerAngle = 0;
+    this.wheelSteer = 0;
+    this.drift = 0;
+    this.prevBeta = 0;
     for (const w of this.wheels) { w.spinSpeed = 0; w.compression = 0; }
   }
 
@@ -156,12 +170,50 @@ export class Vehicle {
     this.speed = vFwd;
     const vtop = p.topSpeed * (input.boost ? 1.18 : 1);
 
-    // ---- steering (speed sensitive, rate limited) --------------------------
+    // ---- body slip angle & drift state -------------------------------------------
+    // beta > 0: the car points left of where it is travelling (left-hand drift)
+    const vLat = V.dot(lv, right);
+    const beta = speedAbs > 3 ? Math.atan2(vLat, Math.max(vFwd, 2)) : 0;
+    const betaRate = (beta - this.prevBeta) / dt;
+    this.prevBeta = beta;
+    this.slipAngle = beta;
+    const fast = speedAbs > 9;
+    // start: handbrake at speed, or power-over / flick past ~11 degrees with throttle on.
+    // After a drift ends there is a short cooldown so the car can't snap into the other way.
+    this.driftCooldown = Math.max(0, this.driftCooldown - dt);
+    let wantDrift = false;
+    if (fast && input.handbrake) {
+      wantDrift = true;
+      if (this.driftDir === 0) this.driftDir = Math.sign(-input.steer) || Math.sign(beta) || 1;
+    } else if (fast && this.drift > 0.3 && this.driftDir !== 0) {
+      wantDrift = Math.sign(beta) === this.driftDir && Math.abs(beta) > 0.07;
+    } else if (fast && this.driftCooldown <= 0 && Math.abs(beta) > 0.28 && input.throttle > 0.7) {
+      wantDrift = true;
+      this.driftDir = Math.sign(beta);
+    }
+    const wasDrifting = this.drift > 0.3;
+    this.drift = moveTowards(this.drift, wantDrift ? 1 : 0, (wantDrift ? 6 : 2.6) * dt);
+    if (!wantDrift && this.drift < 0.05) {
+      if (wasDrifting || this.driftDir !== 0) this.driftCooldown = 0.7;
+      this.driftDir = 0;
+    }
+    if (this.drift > 0.5 && fast) {
+      this.driftTime += dt;
+      this.driftScore += Math.abs(beta) * speedAbs * dt * 10;
+    } else if (this.drift < 0.05) {
+      this.driftTime = 0;
+      this.driftScore = 0;
+    }
+
+    // ---- steering (speed sensitive, rate limited) + auto counter-steer while drifting --
     const hs = Math.pow(clamp(speedAbs / p.topSpeed, 0, 1), 0.65);
-    const steerLimit = lerp(p.maxSteer, p.highSpeedSteer, hs);
+    const steerLimit = lerp(p.maxSteer, p.highSpeedSteer, hs) * (1 + 0.35 * this.drift);
     const target = clamp(input.steer, -1, 1) * steerLimit;
     const returning = Math.abs(target) < Math.abs(this.steerAngle);
     this.steerAngle = moveTowards(this.steerAngle, target, (returning ? 4.5 : 2.6) * dt);
+    // front wheels follow the slide (like a driver catching it), player input adds on top
+    const counter = this.drift * clamp(beta * 0.85, -0.6, 0.6);
+    this.wheelSteer = clamp(this.steerAngle + counter, -0.75, 0.75);
 
     // ---- powertrain -----------------------------------------------------------
     let drive = 0;
@@ -234,7 +286,7 @@ export class Vehicle {
     for (let i = 0; i < this.wheels.length; i++) {
       const w = this.wheels[i];
       const front = w.spec.front;
-      w.steer = front ? this.steerAngle : 0;
+      w.steer = front ? this.wheelSteer : 0;
       if (!w.inContact) {
         w.slipLat = 0;
         w.slipLong = 0;
@@ -271,7 +323,7 @@ export class Vehicle {
         // limited by the less loaded one, keeping lateral grip in reserve
         const mate = this.wheels[i ^ 1];
         const axleMuN = mate.inContact ? Math.min(muN, mu * (mate.load + downforce * 0.25)) : muN;
-        const tc = input.handbrake ? 1.0 : 0.9;
+        const tc = input.handbrake || this.drift > 0.4 ? 1.0 : 0.9;
         fx = clamp(fx, -axleMuN * tc, axleMuN * tc);
       }
       if (brake > 0) {
@@ -279,9 +331,16 @@ export class Vehicle {
         fx -= p.brakeForce * bias * brake * clamp(vl / 0.6, -1, 1);
       }
       let latGrip = 1;
-      if (input.handbrake && !front) {
-        fx -= p.brakeForce * 0.22 * clamp(vl / 0.6, -1, 1);
-        latGrip = p.driftGrip;
+      if (!front) {
+        // sliding rear: grip drops with throttle, so the throttle sets the angle
+        const slideGrip = 0.78 - 0.24 * input.throttle;
+        latGrip = lerp(1, slideGrip, this.drift);
+        if (input.handbrake) {
+          fx -= p.brakeForce * 0.12 * clamp(vl / 0.6, -1, 1);
+          latGrip = Math.min(latGrip, p.driftGrip);
+        }
+      } else {
+        latGrip = 1 + 0.1 * this.drift; // keep steering authority while sliding
       }
       fx -= vl * 12; // rolling resistance
 
@@ -343,11 +402,46 @@ export class Vehicle {
       // in the air: gently level the car and calm spins
       const lx = -up.z, lz = up.x; // up x worldUp: torque axis that rotates 'up' toward world up
       body.applyTorqueImpulse({ x: (lx * 4 - av.x * 1.5) * I * dt, y: -av.y * 0.5 * I * dt, z: (lz * 4 - av.z * 1.5) * I * dt }, true);
-    } else if (Math.abs(input.steer) < 0.1 && !input.handbrake) {
-      // straight-line stability: damp yaw when the player lets go of the wheel
+    } else {
+      const Iy = (p.mass / 12) * (1.9 * 1.9 + 4.5 * 4.5) * 1.1;
       const yawRate = V.dot(av, up);
-      const k = -yawRate * I * 1.2 * dt * clamp(speedAbs / 10, 0, 1);
-      body.applyTorqueImpulse({ x: up.x * k, y: up.y * k, z: up.z * k }, true);
+      let tq = 0;
+      if (this.drift > 0.02 && fast) {
+        // Forza-style drift assist: hold a target slip angle. More throttle or steering into
+        // the turn = more angle; counter-steering / lifting = straighten up. Never spin out.
+        const dir = this.driftDir || Math.sign(beta) || 1;
+        const into = clamp(-input.steer * dir, -1, 1); // + = steering into the drift
+        const targetBeta = dir * clamp(0.28 + 0.26 * input.throttle + 0.2 * into, 0.06, 0.78);
+        // handbrake kick: rotate the car into the turn the player is steering towards
+        const kick = input.handbrake && Math.abs(beta) < 0.5 ? -input.steer * 5.5 : 0;
+        tq += ((14 * (targetBeta - beta) - 3.5 * betaRate) * this.drift + kick) * Iy;
+        // hard limit beyond ~52 degrees
+        if (Math.abs(beta) > 0.9) tq += -Math.sign(beta) * (Math.abs(beta) - 0.9) * 60 * Iy;
+        // keep some momentum: sliding tyres scrub speed, a push along the velocity offsets part of it
+        if (input.throttle > 0.1 && spd > 1 && Math.abs(beta) > 0.12) {
+          const push = (this.drift * input.throttle * p.mass * 1.6 * dt) / spd;
+          body.applyImpulse({ x: lv.x * push, y: 0, z: lv.z * push }, true);
+        }
+      }
+      if (this.drift < 0.5 && fast && !input.handbrake && Math.abs(beta) > 0.08) {
+        // grip driving: resist the rear stepping out unless the player floors it
+        tq += -betaRate * 2.4 * Iy * (1 - this.drift) * (1 - 0.7 * input.throttle * Math.abs(input.steer));
+      }
+      if (contacts >= 3 && speedAbs > 4) {
+        // stability control while gripping (and while a drift fades out): damp any rotation
+        // beyond what the steering asks for, so exits don't snap the other way
+        const L = 2.65;
+        const yawKin = (-vFwd * Math.tan(this.wheelSteer)) / L;
+        const excess = yawRate - yawKin;
+        if (Math.sign(excess) === Math.sign(yawRate) || Math.abs(input.steer) < 0.1) {
+          const gain = (Math.abs(input.steer) < 0.1 && !input.handbrake ? 3.2 : 2.2) * (1 - this.drift);
+          tq += -excess * gain * Iy * clamp(speedAbs / 12, 0, 1);
+        }
+      }
+      if (tq !== 0) {
+        const k = tq * dt;
+        body.applyTorqueImpulse({ x: up.x * k, y: up.y * k, z: up.z * k }, true);
+      }
     }
 
     // ---- gearbox (for sound / HUD) ------------------------------------------------------------

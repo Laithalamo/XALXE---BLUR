@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import type { Vehicle } from '@shared/physics/vehicle';
 import type { Assets } from '../core/Assets';
-import type { CarView } from '../vehicle/CarView';
 
 /**
  * Driving effects: skid marks (ring buffer of ground quads), tyre smoke
  * (lit soft billboards) and impact sparks (additive HDR streaks for bloom).
  */
-const MAX_SKID = 6000;
+const MAX_SKID = 8000;
+/** skid trail slots: 4 wheels x up to 8 cars */
+const SKID_SLOTS = 32;
 
 class SkidMarks {
   readonly mesh: THREE.Mesh;
@@ -15,9 +16,9 @@ class SkidMarks {
   private alpha: Float32Array;
   private uvs: Float32Array;
   private next = 0;
-  private last: (THREE.Vector3 | null)[] = [null, null, null, null];
-  private lastSide: THREE.Vector3[] = [0, 1, 2, 3].map(() => new THREE.Vector3());
-  private along = [0, 0, 0, 0];
+  private last: (THREE.Vector3 | null)[] = new Array(SKID_SLOTS).fill(null);
+  private lastSide: THREE.Vector3[] = Array.from({ length: SKID_SLOTS }, () => new THREE.Vector3());
+  private along: number[] = new Array(SKID_SLOTS).fill(0);
 
   constructor(scene: THREE.Scene) {
     const g = new THREE.BufferGeometry();
@@ -112,7 +113,7 @@ class SkidMarks {
     const a = this.mesh.geometry.getAttribute('aAlpha') as THREE.BufferAttribute;
     a.clearUpdateRanges();
     a.needsUpdate = true;
-    this.last = [null, null, null, null];
+    this.last.fill(null);
   }
 }
 
@@ -223,8 +224,10 @@ export class Effects {
   private smoke!: Billboards;
   private sparks!: Billboards;
   private smokeMat!: THREE.ShaderMaterial;
-  private emitAcc = [0, 0, 0, 0];
+  private emitAcc: number[] = new Array(SKID_SLOTS).fill(0);
   private tmp = new THREE.Vector3();
+  private tmpV = new THREE.Vector3();
+  private right = new THREE.Vector3();
   private contact = new THREE.Vector3();
 
   constructor(private scene: THREE.Scene, private assets: Assets, private maxParticles: number) {
@@ -280,31 +283,40 @@ export class Effects {
     this.sparks.mesh.renderOrder = 6;
   }
 
-  update(dt: number, car: Vehicle, view: CarView, quat: THREE.Quaternion) {
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+  /**
+   * Tyre effects for one car (call for every car each frame). `slot` = car index 0..7;
+   * `smoke` = car is close enough to the camera for smoke to be worth drawing.
+   */
+  car(dt: number, slot: number, car: Vehicle, quat: THREE.Quaternion, smoke: boolean) {
+    const right = this.right.set(1, 0, 0).applyQuaternion(quat);
     const lv = car.body.linvel();
     for (let i = 0; i < 4; i++) {
+      const k = slot * 4 + i;
       const w = car.wheels[i];
       const slip = Math.max(0, Math.abs(w.slipLat) - 2.2) / 5 + w.slipLong / 6;
       if (w.inContact && slip > 0.12) {
         this.contact.set(w.contact.x, w.contact.y, w.contact.z);
-        this.skids.add(i, this.contact, right, w.spec.width, Math.min(1, slip * 1.2));
+        this.skids.add(k, this.contact, right, w.spec.width, Math.min(1, slip * 1.2));
+        if (!smoke) { this.emitAcc[k] = 0; continue; }
         // smoke rate grows with slip
-        this.emitAcc[i] += dt * Math.min(22, slip * 18) * (w.spec.front ? 0.35 : 1);
-        while (this.emitAcc[i] > 1) {
-          this.emitAcc[i] -= 1;
+        this.emitAcc[k] += dt * Math.min(22, slip * 18) * (w.spec.front ? 0.35 : 1);
+        while (this.emitAcc[k] > 1) {
+          this.emitAcc[k] -= 1;
           const p = this.tmp.set(w.contact.x, w.contact.y + 0.2, w.contact.z);
-          const v = new THREE.Vector3(lv.x * 0.35 + (Math.random() - 0.5) * 1.2, 0.35 + Math.random() * 0.6, lv.z * 0.35 + (Math.random() - 0.5) * 1.2);
+          const v = this.tmpV.set(lv.x * 0.35 + (Math.random() - 0.5) * 1.2, 0.35 + Math.random() * 0.6, lv.z * 0.35 + (Math.random() - 0.5) * 1.2);
           this.smoke.spawn(p, v, 1.4 + Math.random() * 1.2, 0.5, 2.6 + Math.random() * 1.6, Math.min(0.3, 0.1 + slip * 0.12));
         }
       } else {
-        this.skids.lift(i);
-        this.emitAcc[i] = 0;
+        this.skids.lift(k);
+        this.emitAcc[k] = 0;
       }
     }
+  }
+
+  /** advance particles; once per frame after all car() calls */
+  update(dt: number) {
     this.smoke.update(dt, 1.4, 0.25);
     this.sparks.update(dt, 0.8, -9.8);
-    void view;
   }
 
   impact(at: THREE.Vector3, vel: THREE.Vector3, strength: number) {
@@ -322,8 +334,15 @@ export class Effects {
     for (const m of [this.skids.mesh, this.smoke.mesh, this.sparks.mesh]) m.layers.set(layer);
   }
 
-  clearTrails() {
-    for (let i = 0; i < 4; i++) this.skids.lift(i);
+  /** stop the trails of one car (respawn) */
+  liftCar(slot: number) {
+    for (let i = 0; i < 4; i++) this.skids.lift(slot * 4 + i);
+  }
+
+  /** new race: wipe skid marks and smoke */
+  clearAll() {
+    this.skids.clear();
     this.smoke.clear();
+    this.sparks.clear();
   }
 }

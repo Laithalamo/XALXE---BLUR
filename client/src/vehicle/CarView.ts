@@ -84,6 +84,9 @@ function makeMaterials(paintColor: number, flakes: THREE.Texture): Record<string
     light_brake: brake,
     light_head: head,
     light_drl: drl,
+    dark: new THREE.MeshStandardMaterial({ color: 0x151517, roughness: 0.6, metalness: 0.2 }),
+    wheel: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.6 }),
+    rest: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.4 }),
     interior_dark: new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.75 }),
     interior_mid: new THREE.MeshStandardMaterial({ color: 0x3b3c3e, roughness: 0.5, metalness: 0.4 }),
     leather: new THREE.MeshStandardMaterial({ color: 0x1d1d1f, roughness: 0.55 }),
@@ -98,11 +101,18 @@ interface WheelRig {
   baseY: number;
 }
 
+interface Level {
+  group: THREE.Group;
+  wheels: WheelRig[];
+}
+
 export class CarView {
   readonly root = new THREE.Group();
   readonly body = new THREE.Group();
   mats!: ReturnType<typeof makeMaterials>;
-  private wheels: WheelRig[] = [];
+  /** detail levels (full model, or near/far LODs for AI cars) */
+  private levels: Level[] = [];
+  private level = 0;
   readonly headLights: THREE.SpotLight[] = [];
   /** local bounding half-extents (for motion blur masks etc.) */
   readonly half = new THREE.Vector3(1.15, 0.72, 2.4);
@@ -110,37 +120,14 @@ export class CarView {
 
   constructor(readonly spec: CarSpec) {}
 
-  async load(assets: Assets, paintColor = this.spec.paint, withHeadlights = false) {
+  async load(assets: Assets, paintColor = this.spec.paint, withHeadlights = false, lod = false) {
     flakeTex ??= await assets.texture('textures/flakes_normal.png');
-    const gltf = await assets.model(this.spec.model);
-    const scene = gltf.scene.clone(true);
+    const urls = lod && this.spec.lodModels?.length ? this.spec.lodModels : [this.spec.model];
+    const gltfs = await Promise.all(urls.map((u) => assets.model(u)));
     this.mats = makeMaterials(paintColor, flakeTex);
     for (const mat of Object.values(this.mats)) (mat as THREE.Material).side = THREE.DoubleSide;
-    scene.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (!m.isMesh) return;
-      const slot = (m.material as THREE.Material).name;
-      const mat = this.mats[slot];
-      if (mat) m.material = mat;
-      else console.warn('car: no material for slot', slot);
-      m.castShadow = slot !== 'glass';
-      m.receiveShadow = true;
-    });
-    // wheel rigs: steer pivot -> spin node (the GLB wheel node)
-    const names = ['Wheel_FL', 'Wheel_FR', 'Wheel_RL', 'Wheel_RR'];
-    for (let i = 0; i < 4; i++) {
-      const node = scene.getObjectByName(names[i]);
-      if (!node) throw new Error('missing ' + names[i]);
-      const ws = this.spec.wheels[i];
-      const steer = new THREE.Object3D();
-      steer.position.set(ws.x, ws.y, ws.z);
-      node.position.set(0, 0, 0);
-      node.parent!.remove(node);
-      steer.add(node);
-      this.body.add(steer);
-      this.wheels.push({ steer, spin: node, baseY: ws.y });
-    }
-    this.body.add(scene);
+    for (const gltf of gltfs) this.levels.push(this.buildLevel(gltf.scene));
+    this.setLevel(0);
     this.root.add(this.body);
 
     // soft contact shadow under the car (ambient occlusion blob)
@@ -166,6 +153,51 @@ export class CarView {
     return this;
   }
 
+  private buildLevel(src: THREE.Object3D): Level {
+    const scene = src.clone(true);
+    const group = new THREE.Group();
+    scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const slot = (m.material as THREE.Material).name.replace(/\.\d+$/, '');
+      const mat = this.mats[slot];
+      if (mat) m.material = mat;
+      else console.warn('car: no material for slot', slot);
+      m.castShadow = slot !== 'glass';
+      m.receiveShadow = true;
+    });
+    // wheel rigs: steer pivot -> spin node (the GLB wheel node)
+    const names = ['Wheel_FL', 'Wheel_FR', 'Wheel_RL', 'Wheel_RR'];
+    const wheels: WheelRig[] = [];
+    for (let i = 0; i < 4; i++) {
+      const node = scene.getObjectByName(names[i]);
+      if (!node) throw new Error('missing ' + names[i]);
+      const ws = this.spec.wheels[i];
+      const steer = new THREE.Object3D();
+      steer.position.set(ws.x, ws.y, ws.z);
+      node.position.set(0, 0, 0);
+      node.parent!.remove(node);
+      steer.add(node);
+      group.add(steer);
+      wheels.push({ steer, spin: node, baseY: ws.y });
+    }
+    group.add(scene);
+    this.body.add(group);
+    return { group, wheels };
+  }
+
+  private setLevel(i: number) {
+    this.level = i;
+    this.levels.forEach((l, k) => { l.group.visible = k === i; });
+  }
+
+  /** AI cars: switch to the far model beyond ~45 m from the camera (with hysteresis) */
+  selectLod(distSq: number) {
+    if (this.levels.length < 2) return;
+    const want = this.level === 0 ? (distSq > 50 * 50 ? 1 : 0) : distSq < 40 * 40 ? 0 : 1;
+    if (want !== this.level) this.setLevel(want);
+  }
+
   /** use a local reflection probe instead of the global HDRI (null = HDRI) */
   setEnvMap(tex: THREE.Texture | null) {
     for (const m of Object.values(this.mats)) {
@@ -186,9 +218,10 @@ export class CarView {
   update(v: Vehicle, pos: THREE.Vector3, quat: THREE.Quaternion, night: boolean) {
     this.root.position.copy(pos);
     this.root.quaternion.copy(quat);
+    const rigs = this.levels[this.level].wheels;
     for (let i = 0; i < 4; i++) {
       const w = v.wheels[i];
-      const rig = this.wheels[i];
+      const rig = rigs[i];
       rig.steer.position.y = w.hardpoint.y - w.suspLength;
       rig.steer.rotation.y = -w.steer;
       rig.spin.rotation.x = -w.spin;

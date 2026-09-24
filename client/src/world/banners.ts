@@ -104,3 +104,35 @@ export function makeShopSignAtlas() {
   return t;
 }
 export const SHOP_COUNT = 16;
+
+/** chevron sign: dir +1 = arrows pointing left, -1 = right */
+export function makeChevronTexture(dir: 1 | -1) {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 224;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#0c0c0c';
+  g.fillRect(0, 0, 512, 224);
+  g.fillStyle = '#ffd21f';
+  for (let i = 0; i < 3; i++) {
+    const cx = 130 + i * 126;
+    const w = 46, h = 84;
+    g.beginPath();
+    if (dir < 0) {
+      g.moveTo(cx - w, 112 - h); g.lineTo(cx + w - 6, 112); g.lineTo(cx - w, 112 + h);
+      g.lineTo(cx - w + 40, 112 + h); g.lineTo(cx + w + 34, 112); g.lineTo(cx - w + 40, 112 - h);
+    } else {
+      g.moveTo(cx + w, 112 - h); g.lineTo(cx - w + 6, 112); g.lineTo(cx + w, 112 + h);
+      g.lineTo(cx + w - 40, 112 + h); g.lineTo(cx - w - 34, 112); g.lineTo(cx + w - 40, 112 - h);
+    }
+    g.closePath();
+    g.fill();
+  }
+  g.strokeStyle = '#ffd21f';
+  g.lineWidth = 10;
+  g.strokeRect(5, 5, 502, 214);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}

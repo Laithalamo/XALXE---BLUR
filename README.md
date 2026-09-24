@@ -3,7 +3,8 @@
 Arcade combat racing in the browser — realistic cars, city street circuits,
 weapon power-ups. Private game for friends on the same home WiFi.
 
-> **Status:** Phase 1 (visual gate) — one car on the *Midtown Circuit*, free driving.
+> **Status:** Solo race on the *Midtown Circuit*: you vs 7 AI cars, 3 laps, start lights,
+> positions, lap times, mini map, turn warnings, drift score. Power-ups and more cars are next.
 
 ## Run it (host PC)
 
@@ -31,15 +32,26 @@ Friends just open that second address in Chrome or Edge. No install needed.
 |---|---|
 | **W / S** or ↑ / ↓ | Throttle / brake (hold S when stopped to reverse) |
 | **A / D** or ← / → | Steer |
-| **Space** | Handbrake (drift) |
+| **Space** | Handbrake — tap it in a corner to start a drift, hold throttle to keep it |
 | **Shift** | Test boost |
 | **R** | Reset car onto the road |
 | **C** | Change camera (chase, far, hood, bumper) |
 | **1 / 2 / 3** | Graphics: Low / Medium / High |
 | **F** | Auto resolution on/off |
 | **H** | Hide the help box |
+| **Enter** | Race again (on the results screen) |
 
-Gamepads work too (RT/LT throttle/brake, left stick steer, A handbrake, Y reset).
+Gamepads work too (RT/LT throttle/brake, left stick steer, A handbrake, Y reset, Start = race again).
+
+## Racing
+
+- The race starts with a 3-2-1 countdown and the start lights (red → green).
+- Top right: your position, lap and lap time. Top left: the running order.
+- Bottom left: mini map (turns with your car; coloured dots are the other cars).
+- Top centre: next turn — direction, how sharp, and distance. Yellow/black chevron
+  boards mark the outside of every corner on the track too.
+- AI level (Easy / Medium / Hard) is picked on the results screen.
+- Free driving without opponents: add `?race=0` to the address.
 
 ## Graphics settings
 
