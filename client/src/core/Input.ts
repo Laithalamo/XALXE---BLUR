@@ -13,7 +13,8 @@ export class Input {
 
   constructor() {
     addEventListener('keydown', (e) => {
-      if (e.repeat) return;
+      // typing in a text field (name, room code) is not driving
+      if (e.repeat || (e.target as HTMLElement | null)?.tagName === 'INPUT') return;
       this.keys.add(e.code);
       this.pressed.add(e.code);
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();

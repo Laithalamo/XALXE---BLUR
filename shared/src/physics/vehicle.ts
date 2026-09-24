@@ -468,6 +468,11 @@ export class Vehicle {
     this.rpm = lerp(this.rpm, targetRpm, 1 - Math.exp(-12 * dt));
   }
 
+  /** online: another browser drives this car, the body only follows its states (kinematic, pushes the others) */
+  setProxy(on: boolean) {
+    this.body.setBodyType(on ? RAPIER.RigidBodyType.KinematicVelocityBased : RAPIER.RigidBodyType.Dynamic, true);
+  }
+
   /** true when the roof points more down than up */
   isUpsideDown() {
     const q = this.body.rotation();

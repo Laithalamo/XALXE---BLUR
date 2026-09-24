@@ -3,6 +3,7 @@ import { emptyInput, type DriveInput, type Vehicle } from '@shared/physics/vehic
 import type { AIDriver, AICarState } from '@shared/ai/driver';
 import type { RacerProgress } from '@shared/race/race';
 import type { CarView } from '../vehicle/CarView';
+import type { RemoteCar } from '../net/RemoteCar';
 
 export interface RacerInfo {
   name: string;
@@ -35,6 +36,12 @@ export class Racer {
   lastProgress = 0;
   /** AI reaction time at the start */
   reaction = 0;
+  /** online: driven in another browser (this one only shows it) */
+  remote: RemoteCar | null = null;
+  /** online: network id of the player driving it (0 = AI / solo) */
+  owner = 0;
+  /** online: that player left during the race */
+  left = false;
 
   constructor(
     readonly index: number,

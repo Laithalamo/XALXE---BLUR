@@ -142,3 +142,26 @@ export function saveCar(id: string) {
     /* storage blocked */
   }
 }
+
+const NAME_KEY = 'xalxe.name';
+
+/** player name for online rooms (?name= overrides) */
+export function loadName(): string {
+  const url = new URLSearchParams(location.search).get('name');
+  if (url) return url;
+  try {
+    const v = localStorage.getItem(NAME_KEY);
+    if (v) return v;
+  } catch {
+    /* storage blocked */
+  }
+  return '';
+}
+
+export function saveName(n: string) {
+  try {
+    localStorage.setItem(NAME_KEY, n);
+  } catch {
+    /* storage blocked */
+  }
+}

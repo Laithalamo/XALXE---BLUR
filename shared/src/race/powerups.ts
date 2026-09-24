@@ -123,6 +123,25 @@ export type CombatEvent =
 
 const hypot3 = (x: number, y: number, z: number) => Math.sqrt(x * x + y * y + z * z);
 
+type Vec = { x: number; y: number; z: number };
+type Body = Vehicle['body'];
+
+/** a hit's knock: keep part of the velocity, add a kick and some spin (also used by the car's owner online) */
+export function applyKnock(body: Body, keep: number, dv: Vec, dw: Vec) {
+  const lv = body.linvel(), av = body.angvel();
+  body.setLinvel({ x: lv.x * keep + dv.x, y: Math.max(lv.y, 0) + dv.y, z: lv.z * keep + dv.z }, true);
+  body.setAngvel({ x: av.x + dw.x, y: av.y + dw.y, z: av.z + dw.z }, true);
+}
+
+/** nitro: extra push along the car while on the ground (one fixed step) */
+export function surgePush(v: Vehicle, dt: number) {
+  if (v.airborne || v.speed <= -1) return;
+  const q = v.body.rotation();
+  const fx = -2 * (q.x * q.z + q.w * q.y), fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
+  const k = v.spec.physics.mass * TUNING.surge.accel * dt;
+  v.body.applyImpulse({ x: fx * k, y: 0, z: fz * k }, true);
+}
+
 export class Combat {
   readonly cars: CombatCar[] = [];
   readonly pickups: Pickup[] = [];
@@ -131,6 +150,12 @@ export class Combat {
   readonly strikes: Strike[] = [];
   /** filled by step()/use(); the owner of the game loop drains it */
   readonly events: CombatEvent[] = [];
+  /**
+   * online: cars driven in another browser. Their crash damage is reported by their owner, and
+   * knocks (hits, wrecks) go to knockHook, which sends them to the owner instead of moving the body.
+   */
+  readonly external: boolean[] = [];
+  knockHook: ((i: number, keep: number, dv: Vec, dw: Vec) => void) | null = null;
   time = 0;
   private nextId = 1;
   private r: Rng;
@@ -303,7 +328,6 @@ export class Combat {
   private stepCar(i: number, dt: number, vehicles: Vehicle[], prog: RacerProgress[]) {
     const c = this.cars[i];
     const v = vehicles[i];
-    const body = v.body;
     if (c.shield > 0) {
       c.shield = Math.max(0, c.shield - dt);
       if (c.shield === 0) c.shieldHits = 0;
@@ -321,30 +345,14 @@ export class Combat {
       return;
     }
     // crash damage from sudden sideways/forward velocity changes (walls, other cars)
-    const lv = body.linvel();
-    if (c.noCrash > 0) c.noCrash--;
-    else {
-      const dv = Math.hypot(lv.x - c.lastVx, lv.z - c.lastVz);
-      if (dv > TUNING.crash.threshold) {
-        const dmg = Math.min(TUNING.crash.max, (dv - TUNING.crash.threshold) * TUNING.crash.perMs);
-        const t = body.translation();
-        const recent = this.time - c.lastHitTime < 4 ? c.lastHitBy : -1;
-        this.damage(i, recent, 'crash', dmg, vehicles, t.x, t.y, t.z);
-        c.noCrash = 12;
-      }
+    if (!this.external[i]) {
+      const dmg = this.crashCheck(i, v);
+      if (dmg > 0) this.crash(i, dmg, vehicles);
     }
-    c.lastVx = lv.x;
-    c.lastVz = lv.z;
     if (c.wreck > 0) return;
-    // nitro: extra push along the car while on the ground
     if (c.surge > 0) {
       c.surge = Math.max(0, c.surge - dt);
-      if (!v.airborne && v.speed > -1) {
-        const q = body.rotation();
-        const fx = -2 * (q.x * q.z + q.w * q.y), fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
-        const k = v.spec.physics.mass * TUNING.surge.accel * dt;
-        body.applyImpulse({ x: fx * k, y: 0, z: fz * k }, true);
-      }
+      if (!this.external[i]) surgePush(v, dt);
     }
     // queued arc shots
     if (c.arcLeft > 0) {
@@ -529,6 +537,37 @@ export class Combat {
     }
   }
 
+  /** crash damage this step from the car's change of velocity (0 = none); also used by the car's owner online */
+  crashCheck(i: number, v: Vehicle): number {
+    const c = this.cars[i];
+    const lv = v.body.linvel();
+    let dmg = 0;
+    if (c.noCrash > 0) c.noCrash--;
+    else {
+      const dv = Math.hypot(lv.x - c.lastVx, lv.z - c.lastVz);
+      if (dv > TUNING.crash.threshold) {
+        dmg = Math.min(TUNING.crash.max, (dv - TUNING.crash.threshold) * TUNING.crash.perMs);
+        c.noCrash = 12;
+      }
+    }
+    c.lastVx = lv.x;
+    c.lastVz = lv.z;
+    return dmg;
+  }
+
+  /** crash damage to car i, credited to whoever hit it last (within 4 s) */
+  crash(i: number, dmg: number, vehicles: Vehicle[]) {
+    const c = this.cars[i];
+    const t = vehicles[i].body.translation();
+    const recent = this.time - c.lastHitTime < 4 ? c.lastHitBy : -1;
+    this.damage(i, recent, 'crash', dmg, vehicles, t.x, t.y, t.z);
+  }
+
+  private knock(i: number, vehicles: Vehicle[], keep: number, dv: Vec, dw: Vec) {
+    if (this.external[i] && this.knockHook) this.knockHook(i, keep, dv, dw);
+    else applyKnock(vehicles[i].body, keep, dv, dw);
+  }
+
   /** apply damage + the matching knock to car i (shields block everything) */
   damage(i: number, by: number, kind: HitKind, amount: number, vehicles: Vehicle[], x: number, y: number, z: number, dirX = 0, dirZ = 0) {
     const c = this.cars[i];
@@ -548,8 +587,6 @@ export class Combat {
     }
     c.stats.damage += amount;
     this.events.push({ t: 'hit', car: i, by, kind, damage: amount, x, y, z });
-    const body = vehicles[i].body;
-    const lv = body.linvel(), av = body.angvel();
     const rs = () => this.r.range(-1, 1);
     let dv = { x: 0, y: 0, z: 0 }, dw = { x: 0, y: 0, z: 0 }, keep = 1;
     if (kind === 'pulse') {
@@ -569,8 +606,7 @@ export class Combat {
       keep = 0.5;
     }
     if (kind !== 'crash') {
-      body.setLinvel({ x: lv.x * keep + dv.x, y: Math.max(lv.y, 0) + dv.y, z: lv.z * keep + dv.z }, true);
-      body.setAngvel({ x: av.x + dw.x, y: av.y + dw.y, z: av.z + dw.z }, true);
+      this.knock(i, vehicles, keep, dv, dw);
       c.noCrash = 30;
     }
     if (c.health <= 0) this.wreck(i, by, vehicles);
@@ -588,11 +624,8 @@ export class Combat {
     c.stats.wrecks++;
     const killer = by >= 0 && by !== i ? by : this.time - c.lastHitTime < 4 ? c.lastHitBy : -1;
     if (killer >= 0) this.cars[killer].stats.kills++;
-    const body = vehicles[i].body;
-    const lv = body.linvel(), av = body.angvel();
     const rs = () => this.r.range(-1, 1);
-    body.setLinvel({ x: lv.x * 0.6, y: Math.max(lv.y, 0) + 8.5, z: lv.z * 0.6 }, true);
-    body.setAngvel({ x: av.x + rs() * 3, y: av.y + rs() * 2.5, z: av.z + rs() * 3 }, true);
+    this.knock(i, vehicles, 0.6, { x: 0, y: 8.5, z: 0 }, { x: rs() * 3, y: rs() * 2.5, z: rs() * 3 });
     this.events.push({ t: 'wreck', car: i, by: killer });
   }
 

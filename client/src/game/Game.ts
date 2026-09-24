@@ -8,13 +8,15 @@ import { createTrackWorld, spawnAt, PHYSICS_HZ } from '@shared/physics/trackPhys
 import { Vehicle, emptyInput, type DriveInput } from '@shared/physics/vehicle';
 import { AIDriver } from '@shared/ai/driver';
 import { Race, gridSlot } from '@shared/race/race';
-import { Combat, POWERS, type CombatEvent } from '@shared/race/powerups';
+import { Combat, POWERS, applyKnock, surgePush, type CombatEvent } from '@shared/race/powerups';
+import { NET_HZ, MAX_PLAYERS, newRoomCode, cleanName, ROOM_CODE, type RaceSetup, type RoomSettings, type ServerMsg, type GridEntry } from '@shared/net/protocol';
+import { combatSnapshot, applyCombatSnapshot, advanceMirror, raceSnapshot, applyRaceSnapshot } from '@shared/net/combatSync';
 import { CARS, CAR_IDS, DEFAULT_CAR } from '@shared/cars';
 import { clamp, rng } from '@shared/math';
 import { Assets } from '../core/Assets';
 import { Input } from '../core/Input';
 import {
-  PRESETS, loadQuality, saveQuality, loadAutoRes, saveAutoRes, loadDifficulty, saveDifficulty, loadCar, saveCar,
+  PRESETS, loadQuality, saveQuality, loadAutoRes, saveAutoRes, loadDifficulty, saveDifficulty, loadCar, saveCar, loadName, saveName,
   type Quality, type AIDifficulty,
 } from '../core/Settings';
 import { Pipeline } from '../render/Pipeline';
@@ -33,6 +35,8 @@ import { Effects } from '../fx/Effects';
 import { CombatView } from '../fx/CombatView';
 import { CarReflections, DETAIL_LAYER } from '../render/Reflections';
 import { Racer, type RacerInfo } from './Racer';
+import { NetClient } from '../net/NetClient';
+import { RemoteCar, packCar } from '../net/RemoteCar';
 
 const PHYS_DT = 1 / PHYSICS_HZ;
 const HOLD = emptyInput();
@@ -49,6 +53,20 @@ const ROSTER: RacerInfo[] = [
 ];
 
 const DRIVE = { front: 'FWD', rear: 'RWD', all: 'AWD' } as const;
+
+/** online: paint + map colour per player (by join order) */
+const PLAYER_COLORS: [number, string][] = [
+  [0xd0101a, '#e8202a'], [0xe8e8e8, '#f2f2f2'], [0xf0b400, '#ffc21a'], [0x1740c8, '#4a86ff'],
+  [0x0d8a45, '#2bd66f'], [0xff5a00, '#ff7a1f'], [0x5b24a8, '#b070ff'], [0x10a0b0, '#3fc1c9'],
+];
+
+/** one car to put on the grid */
+interface Entry {
+  info: RacerInfo;
+  /** local = this browser's player; ai = computer (driven here); remote = driven in another browser */
+  kind: 'local' | 'ai' | 'remote';
+  owner: number;
+}
 
 /** forward direction (XZ) of a car from its rotation */
 const fwdX = (q: THREE.Quaternion) => -2 * (q.x * q.z + q.w * q.y);
@@ -107,13 +125,36 @@ export class Game {
   private aiPilot = this.autopilot && !['drift', 'lane', 'v'].some((k) => this.params.has(k));
   private shotMode = this.params.has('shot');
   /** free driving (no opponents, no laps): ?race=0, or a spawn point given with ?s= */
-  private raceMode = this.params.get('race') !== '0' && !this.params.has('s');
+  private soloRaceMode = this.params.get('race') !== '0' && !this.params.has('s');
+  private raceMode = this.soloRaceMode;
   private frames = 0;
   private finishedAt = -1;
   private wrongWay = 0;
   private standTimer = 0;
   private lampState = '';
   private startRng = rng(7);
+  // ---- online ----
+  private net: NetClient | null = null;
+  private netState: 'off' | 'connecting' | 'room' = 'off';
+  private netError = '';
+  private netName = loadName();
+  /** solo, or in an online race: host (runs AI, power-ups, race rules) / guest */
+  private role: 'solo' | 'host' | 'guest' = 'solo';
+  private online: RaceSetup | null = null;
+  /** the host says a race is on (for players who joined during it) */
+  private roomRacing = false;
+  private settings: RoomSettings = {
+    laps: clamp(Number(this.params.get('laps') ?? 3), 1, 9),
+    ai: clamp(Number(this.params.get('netai') ?? 3), 0, MAX_PLAYERS - 1),
+    difficulty: loadDifficulty(),
+  };
+  private autoStarted = false;
+  private netAcc = 0;
+  private netTick = 0;
+  private netEvents: CombatEvent[] = [];
+  private building = false;
+  private tags = new Map<number, HTMLElement>();
+  private tagLayer!: HTMLElement;
 
   constructor(private canvas: HTMLCanvasElement, hudRoot: HTMLElement) {
     this.pipeline = new Pipeline(canvas);
@@ -122,15 +163,21 @@ export class Game {
     this.hud.onDifficulty = (d) => {
       this.difficulty = d as AIDifficulty;
       saveDifficulty(this.difficulty);
+      this.settings.difficulty = this.difficulty;
+      if (this.net?.isHost) this.sendSetup();
       this.refreshPanel();
     };
     this.hud.onCar = (id) => {
       if (!CARS[id]) return;
       this.carId = id;
       saveCar(id);
+      this.sendInfo();
       this.refreshPanel();
     };
     this.hud.onResume = () => this.setPaused(false);
+    this.hud.onOnline = (a, v) => this.onlineAction(a, v);
+    this.tagLayer = document.createElement('div');
+    hudRoot.appendChild(this.tagLayer);
     if (this.shotMode) document.body.classList.add('shot');
     (window as unknown as { __game: Game }).__game = this;
   }
@@ -181,7 +228,7 @@ export class Game {
     this.fx = new Effects(this.scene, this.assets, preset.particles);
     await this.fx.init();
     this.fx.setLayer(DETAIL_LAYER);
-    this.combatView = new CombatView(this.scene, this.fx, this.racers.length);
+    this.combatView = new CombatView(this.scene, this.fx, MAX_PLAYERS);
     this.combatView.setLayer(DETAIL_LAYER);
     this.setReflections(preset.dynamicReflections);
     this.minimap = new Minimap(this.cl, this.def.roadWidth);
@@ -247,12 +294,38 @@ export class Game {
     this.drainCombat();
   }
 
-  /** player + AI cars on the grid (or the player alone in free mode) */
-  private async createRacers() {
+  /** solo: the player mid-pack and up to 7 AI cars (or the player alone in free mode) */
+  private soloEntries(): Entry[] {
     const nAI = this.raceMode ? clamp(Math.round(Number(this.params.get('ai') ?? 7)), 0, ROSTER.length) : 0;
     const count = nAI + 1;
+    const playerSlot = Math.min(4, count - 1);
+    const out: Entry[] = [];
+    let ai = 0;
+    for (let g = 0; g < count; g++) {
+      if (g === playerSlot) out.push({ info: { name: 'YOU', car: this.carId, paint: CARS[this.carId].paint, mapColor: '#e8202a' }, kind: 'local', owner: 0 });
+      else out.push({ info: ROSTER[ai++], kind: 'ai', owner: 0 });
+    }
+    return out;
+  }
+
+  private async createRacers() {
     const laps = this.raceMode ? clamp(Math.round(Number(this.params.get('laps') ?? 3)), 1, 20) : Infinity;
     const countdown = this.raceMode ? Number(this.params.get('cd') ?? 4) : 0;
+    await this.buildRacers(this.soloEntries(), laps, countdown);
+  }
+
+  /** (re)build the field: entry g starts in grid box g; racer index = g everywhere (all browsers) */
+  private async buildRacers(entries: Entry[], laps: number, countdown: number, seed = 4242) {
+    const night = this.def.theme !== 'day';
+    const views = await Promise.all(entries.map((e) => new CarView(CARS[e.info.car]).load(this.assets, e.info.paint, e.kind === 'local' && night, e.kind !== 'local')));
+    for (const rc of this.racers) {
+      rc.view.dispose();
+      this.world.removeRigidBody(rc.vehicle.body);
+    }
+    this.racers = [];
+    for (const t of this.tags.values()) t.remove();
+    this.tags.clear();
+    const count = entries.length;
     this.race = new Race(this.cl, laps, count, countdown);
     this.race.onLap = (i, lap) => {
       if (i !== this.player.index || !this.raceMode || lap < 2) return;
@@ -261,37 +334,41 @@ export class Game {
     this.race.onFinish = (i) => {
       if (i === this.player.index && this.raceMode) this.finishedAt = this.race.time;
     };
-
-    const night = this.def.theme !== 'day';
-    const pspec = CARS[this.carId];
-    const [playerView, ...aiViews] = await Promise.all([
-      new CarView(pspec).load(this.assets, pspec.paint, night),
-      ...ROSTER.slice(0, nAI).map((info) => new CarView(CARS[info.car]).load(this.assets, info.paint, false, true)),
-    ]);
-    // the player starts mid-pack
-    const playerSlot = Math.min(4, count - 1);
-    let ai = 0;
-    for (let g = 0; g < count; g++) {
-      const isPlayer = g === playerSlot;
+    entries.forEach((e, g) => {
       const slot = gridSlot(g);
-      const sp = this.raceMode
+      const sp = this.raceMode || this.online
         ? spawnAt(this.cl, slot.s, slot.lateral)
         : spawnAt(this.cl, Number(this.params.get('s') ?? -18), Number(this.params.get('lat') ?? 3.6));
-      const info: RacerInfo = isPlayer ? { name: 'YOU', car: this.carId, paint: pspec.paint, mapColor: '#e8202a' } : ROSTER[ai];
-      const vehicle = new Vehicle(this.world, CARS[info.car], sp.pos, sp.yaw);
-      const view = isPlayer ? playerView : aiViews[ai];
-      const driver = isPlayer ? null : new AIDriver(this.cl, this.line, this.def.roadWidth, this.difficulty, 101 + ai);
-      if (!isPlayer) ai++;
-      const racer = new Racer(this.racers.length, info, vehicle, view, driver, isPlayer, g);
+      const vehicle = new Vehicle(this.world, CARS[e.info.car], sp.pos, sp.yaw);
+      const drives = e.kind === 'ai' && this.role !== 'guest';
+      const driver = drives ? new AIDriver(this.cl, this.line, this.def.roadWidth, this.online ? this.online.difficulty : this.difficulty, 101 + g + seed) : null;
+      const racer = new Racer(g, e.info, vehicle, views[g], driver, e.kind === 'local', g);
+      racer.owner = e.owner;
+      if (e.kind === 'remote' || (e.kind === 'ai' && this.role === 'guest')) racer.remote = new RemoteCar(vehicle);
       this.racers.push(racer);
-      this.scene.add(view.root);
-      this.race.place(racer.index, sp.pos.x, sp.pos.z, true);
-      if (isPlayer) this.player = racer;
-    }
+      this.scene.add(views[g].root);
+      this.race.place(g, sp.pos.x, sp.pos.z, true);
+      if (e.kind === 'local') this.player = racer;
+      if (e.owner && e.kind === 'remote') {
+        const tag = document.createElement('div');
+        tag.className = 'hud-tag';
+        tag.textContent = e.info.name;
+        tag.style.color = e.info.mapColor;
+        this.tagLayer.appendChild(tag);
+        this.tags.set(g, tag);
+      }
+    });
     this.playerAI = new AIDriver(this.cl, this.line, this.def.roadWidth, 'medium', 99);
     this.setReactions();
     this.vehicles = this.racers.map((rc) => rc.vehicle);
-    this.combat = new Combat(this.cl, this.def.roadWidth, this.corners, this.racers.map((rc) => rc.vehicle.spec.maxHealth));
+    this.combat = new Combat(this.cl, this.def.roadWidth, this.corners, this.racers.map((rc) => rc.vehicle.spec.maxHealth), seed);
+    if (this.role === 'host') {
+      this.racers.forEach((rc, i) => { this.combat.external[i] = rc.remote !== null; });
+      this.combat.knockHook = (i, keep, dv, dw) => {
+        const rc = this.racers[i];
+        if (rc.owner) this.net?.send({ t: 'knock', to: rc.owner, i, k: keep, v: [dv.x, dv.y, dv.z], w: [dw.x, dw.y, dw.z] });
+      };
+    }
   }
 
   private setReactions() {
@@ -306,14 +383,19 @@ export class Game {
   }
 
   start() {
+    const code = (this.params.get('room') ?? '').toUpperCase();
+    if (ROOM_CODE.test(code)) void this.joinRoom(code);
     this.last = performance.now();
+    // tests on slow machines: ?skiprender=N draws only every Nth frame, 0 = never (the simulation keeps real time)
+    const every = Math.max(0, Number(this.params.get('skiprender') ?? 1));
+    let n = 0;
     const tick = (t: number) => {
       // screenshot mode: stop rendering once the requested frame is done
       if (!(window as unknown as { __shotReady?: boolean }).__shotReady) requestAnimationFrame(tick);
       // rAF timestamps can be older than performance.now() at start: never go negative
       const dt = clamp((t - this.last) / 1000, 0, 0.1);
       this.last = t;
-      this.frame(dt);
+      this.frame(dt, every > 0 && ++n % every === 0);
     };
     requestAnimationFrame(tick);
   }
@@ -324,7 +406,15 @@ export class Game {
     const go = race.started && advance;
     const states = go ? this.racers.map((rc) => rc.aiState(race.racers[rc.index])) : null;
     const combat = this.combat;
+    const guest = this.role === 'guest';
+    const now = this.net?.now() ?? 0;
     for (const rc of this.racers) {
+      if (rc.remote) {
+        // driven in another browser: follow its latest state
+        rc.savePrev();
+        rc.remote.step(PHYS_DT, now);
+        continue;
+      }
       let inp = HOLD;
       const cc = combat.cars[rc.index];
       if (states && cc.wreck <= 0) {
@@ -337,15 +427,23 @@ export class Game {
       rc.cmd.boost = cc.surge > 0;
       rc.savePrev();
       rc.vehicle.step(PHYS_DT, rc.cmd);
+      // online guest: the host tracks the nitro, the push happens here on the real car
+      if (guest && go && cc.surge > 0 && cc.wreck <= 0) surgePush(rc.vehicle, PHYS_DT);
     }
     this.world.step();
     for (const rc of this.racers) {
       rc.sync();
       race.track(rc.index, rc.curPos.x, rc.curPos.z);
     }
-    if (go) {
+    if (go && !guest) {
       combat.step(PHYS_DT, this.vehicles, race.racers);
       this.drainCombat();
+    } else if (go) {
+      // guest: power-ups are the host's; report our own crash damage to it
+      advanceMirror(combat, PHYS_DT);
+      const i = this.player.index;
+      const dmg = combat.crashCheck(i, this.player.vehicle);
+      if (dmg > 0 && combat.cars[i].wreck <= 0 && this.net) this.net.send({ t: 'crash', to: this.net.host, dmg: Math.round(dmg * 10) / 10 });
     }
     if (advance) race.step(PHYS_DT);
   }
@@ -357,6 +455,7 @@ export class Game {
     const pl = this.player.index;
     const name = (i: number) => `<b style="color:${this.racers[i].info.mapColor}">${this.racers[i].info.name}</b>`;
     for (const e of ev.splice(0)) {
+      if (this.role === 'host') this.netEvents.push(e);
       this.combatView.onEvent(e, this.racers);
       this.onCombatEvent(e, pl, name);
     }
@@ -396,7 +495,8 @@ export class Game {
       case 'respawn': {
         const rc = this.racers[e.car];
         rc.view.setWrecked(false, rc.info.paint);
-        this.respawn(rc);
+        // a car driven in another browser respawns there
+        if (!rc.remote) this.respawn(rc);
         break;
       }
       default:
@@ -459,6 +559,7 @@ export class Game {
 
   private frame(dt: number, render = true) {
     if (render) this.frames++;
+    this.autoStart();
     const inp = this.input;
     inp.update(dt);
     if (inp.wasPressed('KeyC')) this.chase.cycle();
@@ -475,19 +576,24 @@ export class Game {
     }
     const plDone = this.race.racers[this.player.index].finished;
     if (inp.wasPressed('KeyE') && this.race.started && !plDone) this.usePower();
-    if (inp.wasPressed('KeyQ')) this.combat.cycle(this.player.index);
+    if (inp.wasPressed('KeyQ')) {
+      this.combat.cycle(this.player.index);
+      if (this.role === 'guest') this.net?.send({ t: 'cycle', to: this.net.host });
+    }
     const enter = inp.wasPressed('Enter') || inp.wasPressed('NumpadEnter');
     const padStart = inp.wasPressed('PadStart');
-    if ((enter || (padStart && !this.paused)) && (this.resultsUp() || this.paused)) this.restartRace();
-    else if ((inp.wasPressed('Escape') || padStart) && this.raceMode && !this.resultsUp()) this.setPaused(!this.paused);
-    if (this.paused) {
+    if ((enter || (padStart && !this.paused)) && (this.resultsUp() || this.paused)) this.enterPressed();
+    else if ((inp.wasPressed('Escape') || padStart) && (this.raceMode || this.online) && !this.resultsUp()) this.setPaused(!this.paused);
+    // online the race goes on behind the menu (the car just rolls)
+    if (this.paused && !this.online) {
       if (render) {
         this.pipeline.render(dt, 0);
         this.hud.update(dt, this.player.vehicle, this.quality, this.def.name, this.pipeline.renderer.info.render.calls, this.pipeline.scale, this.autoRes);
       }
       return;
     }
-    const drive = this.autopilot ? this.autopilotInput() : this.shotMode ? emptyInput() : inp.drive;
+    if (this.building) return;
+    const drive = this.paused ? HOLD : this.autopilot ? this.autopilotInput() : this.shotMode ? emptyInput() : inp.drive;
 
     // fixed-step physics with render interpolation
     this.acc += this.shotMode && !this.autopilot ? 0 : this.shotMode ? Math.min(dt, 1 / 60) : dt;
@@ -502,6 +608,7 @@ export class Game {
     for (const rc of this.racers) rc.interpolate(alpha);
 
     this.updateRacers(dt);
+    if (this.online) this.onlineFrame(dt);
     const pl = this.player;
     const night = this.def.theme === 'night';
     if (!this.applyShotCamera()) this.chase.update(dt, pl.pos, pl.quat, pl.vel, pl.vehicle.speed);
@@ -525,6 +632,7 @@ export class Game {
     this.reflections?.update(this.pipeline.renderer, this.scene, pl.view.root, pl.pos, this.shotMode && this.bench === 0 ? 6 : 1);
     this.pipeline.render(this.shotMode ? 1 / 60 : dt, 0.55);
     this.updateHud(dt);
+    this.updateTags();
     if (this.autoRes) this.updateAutoRes(dt);
     if (this.bench > 0) this.benchFrame();
     else if (this.shotMode && this.frames === Number(this.params.get('frames') ?? 8)) (window as unknown as { __shotReady: boolean }).__shotReady = true;
@@ -534,6 +642,10 @@ export class Game {
     const i = this.player.index;
     const cc = this.combat.cars[i];
     if (!cc.slots.length || cc.wreck > 0) return;
+    if (this.role === 'guest') {
+      this.net?.send({ t: 'use', to: this.net.host, sel: cc.sel });
+      return;
+    }
     const kind = cc.slots[cc.sel];
     if (!this.combat.use(i, this.vehicles, this.race.racers, this.race.standings())) {
       this.hud.toast(kind === 'storm' ? 'NO ONE AHEAD' : kind === 'patch' ? 'HEALTH FULL' : 'NOT NOW', 1.0);
@@ -586,10 +698,12 @@ export class Game {
     const race = this.race;
     const pl = this.player;
     const plDone = race.racers[pl.index].finished;
-    const plProg = race.progress(pl.index);
+    // rubber banding follows the best human driver (online: any player)
+    let plProg = race.progress(pl.index);
+    for (const rc of this.racers) if (rc.owner && !rc.left) plProg = Math.max(plProg, race.progress(rc.index));
     const cam = this.camera.position;
     for (const rc of this.racers) {
-      if (rc.ai || (rc.isPlayer && this.aiPilot)) this.aiPowers(rc, dt);
+      if (rc.ai || (rc.isPlayer && this.aiPilot && this.role !== 'guest')) this.aiPowers(rc, dt);
       const lv = rc.vehicle.body.linvel();
       rc.vel.set(lv.x, lv.y, lv.z);
       const dv = rc.vel.distanceTo(rc.lastVel);
@@ -602,6 +716,8 @@ export class Game {
       const pr = race.racers[rc.index];
       // rubber banding: cars far ahead of the player ease off, cars far behind push a little harder
       if (rc.ai) rc.ai.catchUp = plDone || !this.raceMode ? 1 : clamp(1 - (race.progress(rc.index) - plProg) * 0.0004, 0.94, 1.07);
+      // the other browsers look after their own cars
+      if (rc.remote) continue;
       // wrecked cars come back by themselves (combat timer)
       if (this.combat.cars[rc.index].wreck > 0) {
         rc.stuckTime = 0;
@@ -662,6 +778,8 @@ export class Game {
     if (this.raceMode && t < 1 && t >= -3) {
       banner = t < -2 ? '3' : t < -1 ? '2' : t < 0 ? '1' : 'GO!';
       color = t < 0 ? '#ffffff' : '#3dff6a';
+    } else if (this.online && t < -3) {
+      banner = 'GET READY';
     } else if (cc.wreck > 0) {
       banner = 'WRECKED';
       color = '#ff3b30';
@@ -691,7 +809,7 @@ export class Game {
       if (p.cooldown <= 0) this.blips.push({ x: p.x, z: p.z, color: POWERS[p.kind].color, kind: 'pickup' });
     }
     for (const rc of this.racers) {
-      if (rc !== pl) this.blips.push({ x: rc.pos.x, z: rc.pos.z, color: rc.info.mapColor, kind: 'car' });
+      if (rc !== pl && !rc.left) this.blips.push({ x: rc.pos.x, z: rc.pos.z, color: rc.info.mapColor, kind: 'car' });
     }
     this.minimap.draw(pl.pos.x, pl.pos.z, yaw, this.blips);
 
@@ -722,6 +840,7 @@ export class Game {
       car: this.carId,
       cars: CAR_IDS.map((id) => ({ id, name: CARS[id].name.toUpperCase(), drive: DRIVE[CARS[id].physics.driven], stats: CARS[id].stats })),
       carNote: changed ? `${CARS[this.carId].name.toUpperCase()} — READY FOR THE NEXT RACE` : undefined,
+      online: this.onlinePanel(),
     };
   }
 
@@ -919,4 +1038,393 @@ export class Game {
     this.applyFacadeDetail(preset.facadeDetail);
     this.hud.toast(`GRAPHICS: ${q.toUpperCase()}`);
   }
+
+  // ================================================================================================
+  // online play: one browser hosts (race rules, AI, power-ups), everyone drives their own car
+  // ================================================================================================
+
+  private onlinePanel() {
+    const net = this.net;
+    return {
+      state: this.netState,
+      name: this.netName,
+      code: net?.code,
+      isHost: !!net?.isHost,
+      racing: !!this.online || this.roomRacing,
+      players: net
+        ? [...net.players.values()].sort((a, b) => a.id - b.id).map((p) => ({
+            name: p.name, car: CARS[p.car]?.name.toUpperCase() ?? p.car, host: p.id === net.host, you: p.id === net.you,
+          }))
+        : [],
+      ai: this.settings.ai,
+      laps: this.settings.laps,
+      error: this.netError,
+    };
+  }
+
+  private playerName() {
+    return this.netName || 'PLAYER';
+  }
+
+  private sendInfo() {
+    this.net?.send({ t: 'info', name: this.playerName(), car: this.carId, paint: CARS[this.carId].paint });
+  }
+
+  private sendSetup(to?: number) {
+    this.net?.send({ t: 'setup', s: this.settings, racing: !!this.online, to });
+  }
+
+  private enterPressed() {
+    if (this.net && this.netState === 'room') {
+      if (this.net.isHost && (!this.online || this.resultsUp())) this.hostStart();
+      return;
+    }
+    void this.restartRace();
+  }
+
+  private onlineAction(a: string, v: string) {
+    switch (a) {
+      case 'create':
+        void this.joinRoom(newRoomCode());
+        break;
+      case 'join':
+        void this.joinRoom(v);
+        break;
+      case 'leave':
+        this.leaveRoom();
+        break;
+      case 'start':
+        this.hostStart();
+        break;
+      case 'copy': {
+        const link = `${location.origin}${location.pathname}?room=${this.net?.code ?? ''}`;
+        navigator.clipboard?.writeText(link).then(() => this.hud.toast('LINK COPIED', 1.2), () => this.hud.toast(link, 4));
+        break;
+      }
+      case 'name':
+        this.netName = cleanName(v).toUpperCase();
+        saveName(this.netName);
+        this.sendInfo();
+        break;
+      case 'ai+':
+      case 'ai-':
+        this.settings.ai = clamp(this.settings.ai + (a === 'ai+' ? 1 : -1), 0, MAX_PLAYERS - 1);
+        this.sendSetup();
+        break;
+      case 'laps+':
+      case 'laps-':
+        this.settings.laps = clamp(this.settings.laps + (a === 'laps+' ? 1 : -1), 1, 9);
+        this.sendSetup();
+        break;
+    }
+    this.refreshPanel();
+  }
+
+  private async joinRoom(code: string) {
+    if (!ROOM_CODE.test(code)) {
+      this.netError = 'ENTER THE ROOM CODE (4 LETTERS)';
+      this.refreshPanel();
+      return;
+    }
+    if (this.net) this.leaveRoom();
+    this.netState = 'connecting';
+    this.netError = '';
+    if (!this.paused) this.setPaused(true);
+    else this.refreshPanel();
+    const net = new NetClient(code);
+    net.onMessage = (m) => this.onNet(m);
+    net.onClose = (why) => {
+      this.net = null;
+      this.netState = 'off';
+      this.netError = `DISCONNECTED (${why})`.toUpperCase();
+      if (this.online) void this.endOnlineRace('DISCONNECTED');
+      this.refreshPanel();
+    };
+    try {
+      await net.connect(this.playerName(), this.carId, CARS[this.carId].paint);
+    } catch (e) {
+      this.netState = 'off';
+      this.netError = String((e as Error).message ?? e).toUpperCase();
+      this.refreshPanel();
+      return;
+    }
+    this.net = net;
+    this.netState = 'room';
+    const u = new URL(location.href);
+    u.searchParams.set('room', code);
+    history.replaceState(null, '', u);
+    if (net.isHost) this.sendSetup();
+    this.refreshPanel();
+  }
+
+  private leaveRoom() {
+    const u = new URL(location.href);
+    u.searchParams.delete('room');
+    history.replaceState(null, '', u);
+    this.net?.close();
+    this.net = null;
+    this.netState = 'off';
+    this.roomRacing = false;
+    if (this.online) void this.endOnlineRace('');
+    this.refreshPanel();
+  }
+
+  private feedName(i: number) {
+    const rc = this.racers[i];
+    return rc ? `<b style="color:${rc.info.mapColor}">${rc.info.name.replace(/[<>&]/g, '')}</b>` : '?';
+  }
+
+  private onNet(m: ServerMsg) {
+    const net = this.net;
+    if (!net) return;
+    switch (m.t) {
+      case 'join':
+        this.hud.feed(`${m.p.name.replace(/[<>&]/g, '')} joined`);
+        if (net.isHost) this.sendSetup(m.p.id);
+        break;
+      case 'leave': {
+        const rc = this.racers.find((r) => r.owner === m.id && r.remote);
+        if (rc && this.online) {
+          this.hud.feed(`${this.feedName(rc.index)} left`);
+          rc.left = true;
+          rc.remote!.park();
+          rc.view.root.visible = false;
+          this.tags.get(rc.index)?.remove();
+          this.tags.delete(rc.index);
+        }
+        break;
+      }
+      case 'host':
+        if (net.isHost) {
+          this.hud.toast('YOU ARE THE HOST NOW', 2);
+          if (this.online) {
+            net.send({ t: 'end' });
+            void this.endOnlineRace('THE HOST LEFT');
+          } else this.sendSetup();
+        }
+        break;
+      case 'setup':
+        if (m.from === net.host) {
+          this.settings = m.s;
+          this.roomRacing = m.racing;
+        }
+        break;
+      case 'start':
+        if (m.from === net.host) void this.startOnlineRace(m.race);
+        return;
+      case 'end':
+        if (m.from === net.host && this.online) void this.endOnlineRace('BACK TO THE ROOM');
+        this.roomRacing = false;
+        break;
+      case 'w': {
+        if (this.building || !this.online || m.from !== net.host) return;
+        for (const [i, st] of m.cars) {
+          const rc = this.racers[i];
+          if (rc?.remote && (rc.owner === 0 || rc.owner === m.from)) rc.remote.push(st, m.ts);
+        }
+        if (this.role === 'guest') {
+          if (m.cb) applyCombatSnapshot(this.combat, m.cb);
+          if (m.r) applyRaceSnapshot(this.race, m.r, this.player.index);
+        }
+        return;
+      }
+      case 's': {
+        if (this.building || !this.online) return;
+        const rc = this.racers[m.i];
+        if (rc?.remote && rc.owner === m.from) rc.remote.push(m.st, m.ts);
+        return;
+      }
+      case 'ev': {
+        if (this.building || this.role !== 'guest' || m.from !== net.host) return;
+        const pl = this.player.index;
+        for (const e of m.e) {
+          if ('car' in e && !this.racers[e.car]) continue;
+          this.combatView.onEvent(e, this.racers);
+          this.onCombatEvent(e, pl, (i) => this.feedName(i));
+        }
+        return;
+      }
+      case 'use':
+      case 'cycle':
+      case 'crash': {
+        if (this.building || this.role !== 'host') return;
+        const rc = this.racers.find((r) => r.owner === m.from && r.remote);
+        if (!rc || !this.race.started) return;
+        const cc = this.combat.cars[rc.index];
+        if (m.t === 'cycle') this.combat.cycle(rc.index);
+        else if (m.t === 'use') {
+          if (m.sel >= 0 && m.sel < cc.slots.length) cc.sel = m.sel;
+          this.combat.use(rc.index, this.vehicles, this.race.racers, this.race.standings());
+        } else this.combat.crash(rc.index, clamp(Number(m.dmg) || 0, 0, 24), this.vehicles);
+        this.drainCombat();
+        return;
+      }
+      case 'knock': {
+        if (this.role !== 'guest' || m.i !== this.player.index || m.from !== net.host) return;
+        applyKnock(this.player.vehicle.body, m.k, { x: m.v[0], y: m.v[1], z: m.v[2] }, { x: m.w[0], y: m.w[1], z: m.w[2] });
+        this.combat.cars[m.i].noCrash = 30;
+        return;
+      }
+      default:
+        break;
+    }
+    this.refreshPanel();
+  }
+
+  /** host: put everyone in the room (plus AI cars) on the grid and go */
+  private hostStart() {
+    const net = this.net;
+    if (!net?.isHost || this.building || (this.online && !this.resultsUp())) return;
+    const humans = [...net.players.values()];
+    // players in random order behind the AI cars
+    for (let k = humans.length - 1; k > 0; k--) {
+      const j = Math.floor(Math.random() * (k + 1));
+      [humans[k], humans[j]] = [humans[j], humans[k]];
+    }
+    const nAI = clamp(this.settings.ai, 0, MAX_PLAYERS - humans.length);
+    const grid: GridEntry[] = [];
+    for (let k = 0; k < nAI; k++) {
+      const r = ROSTER[k];
+      grid.push({ name: r.name, car: r.car, paint: r.paint, mapColor: r.mapColor });
+    }
+    for (const p of humans) {
+      const [paint, color] = PLAYER_COLORS[(p.id - 1) % PLAYER_COLORS.length];
+      grid.push({ name: p.name, car: CARS[p.car] ? p.car : DEFAULT_CAR, paint, mapColor: color, player: p.id });
+    }
+    const countdown = 4;
+    const setup: RaceSetup = {
+      go: Math.round(net.now() + 5000 + countdown * 1000), countdown, laps: this.settings.laps,
+      difficulty: this.settings.difficulty, seed: Math.floor(Math.random() * 1e6), grid,
+    };
+    net.send({ t: 'start', race: setup });
+    void this.startOnlineRace(setup);
+  }
+
+  private async startOnlineRace(setup: RaceSetup) {
+    const net = this.net;
+    if (!net) return;
+    this.roomRacing = true;
+    if (!setup.grid.some((g) => g.player === net.you)) {
+      // joined after the start: watch the room, race the next one
+      this.refreshPanel();
+      return;
+    }
+    this.building = true;
+    this.role = net.host === net.you ? 'host' : 'guest';
+    this.online = setup;
+    this.raceMode = true;
+    this.paused = false;
+    this.hud.setPanel(null);
+    this.hud.toast('GET READY', 4);
+    const entries: Entry[] = setup.grid.map((g) => ({
+      info: { name: g.name, car: CARS[g.car] ? g.car : DEFAULT_CAR, paint: g.paint, mapColor: g.mapColor },
+      kind: g.player === undefined ? 'ai' : g.player === net.you ? 'local' : 'remote',
+      owner: g.player ?? 0,
+    }));
+    try {
+      await this.buildRacers(entries, setup.laps, setup.countdown, setup.seed);
+      await this.afterRebuild();
+    } finally {
+      this.race.time = (net.now() - setup.go) / 1000;
+      this.building = false;
+    }
+  }
+
+  /** online race over (or left): back to a solo race behind the room menu */
+  private async endOnlineRace(msg: string) {
+    if (!this.online) return;
+    this.building = true;
+    this.online = null;
+    this.role = 'solo';
+    this.raceMode = this.soloRaceMode;
+    try {
+      await this.createRacers();
+      await this.afterRebuild();
+    } finally {
+      this.building = false;
+    }
+    if (msg) this.hud.toast(msg, 2.5);
+    this.setPaused(true);
+  }
+
+  /** new field of cars: effects, reflections, settle the suspensions, warm the shaders */
+  private async afterRebuild() {
+    this.pipeline.motionBlur.cars.length = 0;
+    this.trackBlur();
+    this.player.view.setEnvMap(this.reflections ? this.reflections.texture : null);
+    this.fx.clearAll();
+    this.combatView.clear();
+    this.finishedAt = -1;
+    this.wrongWay = 0;
+    this.lampState = '';
+    this.acc = 0;
+    this.netAcc = 0;
+    this.netEvents.length = 0;
+    for (let i = 0; i < 60; i++) this.physicsStep(HOLD, false);
+    for (const rc of this.racers) {
+      rc.savePrev();
+      rc.interpolate(1);
+      rc.lastVel.set(0, 0, 0);
+    }
+    this.chase.snap();
+    await this.pipeline.renderer.compileAsync(this.scene, this.camera);
+    this.pipeline.motionBlur.resetHistory();
+  }
+
+  /** online, once per frame: keep the race clock on the server's, send our cars */
+  private onlineFrame(dt: number) {
+    const net = this.net, on = this.online;
+    if (!net || !on) return;
+    const target = (net.now() - on.go) / 1000;
+    const err = target - this.race.time;
+    this.race.time += Math.abs(err) > 0.3 ? err : err * 0.1;
+    this.netAcc += dt;
+    if (this.netAcc >= 1 / NET_HZ) {
+      this.netAcc = Math.min(this.netAcc - 1 / NET_HZ, 1 / NET_HZ);
+      this.netTick++;
+      const ts = Math.round(net.now());
+      if (this.role === 'host') {
+        const cars: [number, number[]][] = [];
+        for (const rc of this.racers) if (!rc.remote) cars.push([rc.index, packCar(rc.vehicle)]);
+        net.send({
+          t: 'w', ts, cars,
+          cb: this.netTick % 2 === 0 ? combatSnapshot(this.combat) : undefined,
+          r: this.netTick % 5 === 0 ? raceSnapshot(this.race) : undefined,
+        });
+      } else net.send({ t: 's', ts, i: this.player.index, st: packCar(this.player.vehicle) });
+    }
+    if (this.role === 'host' && this.netEvents.length) net.send({ t: 'ev', e: this.netEvents.splice(0) });
+  }
+
+  /** name tags over the other players' cars */
+  private tagV = new THREE.Vector3();
+  private updateTags() {
+    if (!this.tags.size) return;
+    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    const cam = this.camera.position;
+    for (const [i, el] of this.tags) {
+      const rc = this.racers[i];
+      const v = this.tagV.copy(rc.pos);
+      v.y += 1.9;
+      const d = v.distanceTo(cam);
+      v.project(this.camera);
+      const show = d < 180 && v.z > -1 && v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05;
+      el.style.display = show ? '' : 'none';
+      if (show) {
+        el.style.left = `${((v.x + 1) / 2) * w}px`;
+        el.style.top = `${((1 - v.y) / 2) * h}px`;
+        el.style.opacity = String(clamp(1.4 - d / 130, 0.35, 1));
+      }
+    }
+  }
+
+  /** test hook: ?autostart=N makes the host start once N players are in the room */
+  private autoStart() {
+    const n = Number(this.params.get('autostart') ?? 0);
+    const net = this.net;
+    if (!n || !net?.isHost || this.online || this.autoStarted || net.players.size < n) return;
+    this.autoStarted = true;
+    this.hostStart();
+  }
+
 }

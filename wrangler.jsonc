@@ -1,0 +1,18 @@
+// Cloudflare deploy config (see ONLINE.md): the built game as static assets + the room server.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "xalxe",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "assets": {
+    "directory": "./client/dist",
+    "binding": "ASSETS",
+    // every request goes through the worker first, so the optional password covers the whole site
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "observability": { "enabled": true }
+}

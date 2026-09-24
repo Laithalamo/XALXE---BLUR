@@ -5,7 +5,8 @@ weapon power-ups. Private game for friends on the same home WiFi.
 
 > **Status:** Solo combat race on the *Midtown Circuit*: you vs 7 AI cars, 3 laps, 7 power-ups,
 > health and wrecks, start lights, positions, lap times, mini map, turn warnings, drift score.
-> Eight cars. Next: more tracks, menus, profiles, sound, LAN multiplayer.
+> Eight cars. **Online races with friends** (browser, up to 8 cars): see [ONLINE.md](ONLINE.md).
+> Next: more tracks, menus, profiles, sound.
 
 ## Run it (host PC)
 
@@ -41,7 +42,7 @@ Friends just open that second address in Chrome or Edge. No install needed.
 | **1 / 2 / 3** | Graphics: Low / Medium / High |
 | **F** | Auto resolution on/off |
 | **H** | Hide the help box |
-| **Esc** | Pause: resume, restart, change car / AI level |
+| **Esc** | Menu: resume, restart, change car / AI level, online rooms |
 | **Enter** | Race again (results screen) / restart (pause menu) |
 
 Gamepads work too (RT/LT throttle/brake, left stick steer, A handbrake, B use power-up,
@@ -56,6 +57,13 @@ X/LB next power-up, Y reset, Start = race again).
   boards mark the outside of every corner on the track too.
 - AI level (Easy / Medium / Hard) is picked on the results screen.
 - Free driving without opponents: add `?race=0` to the address.
+
+## Online races
+
+**Esc** → your name → **CREATE ROOM** → **COPY LINK** and send it to your friends (or give them
+the 4-letter code to **JOIN**). The host picks AI cars and laps and presses **START RACE**.
+Works over the internet on Cloudflare's free plan (setup: [ONLINE.md](ONLINE.md)) and on the
+home WiFi with `start.bat`.
 
 ## Cars
 

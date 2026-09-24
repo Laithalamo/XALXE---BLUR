@@ -9,11 +9,13 @@
   },
   "dependencies": {
     "express": "^5.2.1",
-    "tsx": "^4.23.15"
+    "tsx": "^4.23.15",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.2",
+    "@types/ws": "^8.18.1",
     "typescript": "5.9"
   }
 }

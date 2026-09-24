@@ -34,6 +34,20 @@ export interface ResultRow extends StandingRow {
   kills: number;
 }
 
+/** online section of the pause / results panel */
+export interface OnlinePanel {
+  state: 'off' | 'connecting' | 'room';
+  name: string;
+  code?: string;
+  players?: { name: string; car: string; host: boolean; you: boolean }[];
+  isHost?: boolean;
+  /** an online race is on */
+  racing?: boolean;
+  ai?: number;
+  laps?: number;
+  error?: string;
+}
+
 export interface PanelInfo {
   mode: 'results' | 'pause';
   rows?: ResultRow[];
@@ -42,7 +56,10 @@ export interface PanelInfo {
   car: string;
   cars: { id: string; name: string; drive: string; stats: { speed: number; acceleration: number; handling: number; health: number } }[];
   carNote?: string;
+  online: OnlinePanel;
 }
+
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 export const fmtTime = (t: number) => {
   const m = Math.floor(t / 60), s = t - m * 60;
@@ -77,6 +94,8 @@ export class Hud {
   onResume: (() => void) | null = null;
   onDifficulty: ((d: string) => void) | null = null;
   onCar: ((id: string) => void) | null = null;
+  /** online actions: create, join (code), leave, start, copy, name (text), ai+/-, laps+/- */
+  onOnline: ((action: string, value: string) => void) | null = null;
   readonly mapSlot: HTMLElement;
   readonly slotsEl: HTMLElement;
   private healthFill: HTMLElement;
@@ -102,7 +121,7 @@ export class Hud {
         <div><kbd>W</kbd><kbd>S</kbd> throttle / brake-reverse &nbsp; <kbd>A</kbd><kbd>D</kbd> steer</div>
         <div><kbd>Space</kbd> handbrake → drift (hold throttle to keep it) &nbsp; <kbd>R</kbd> reset</div>
         <div><kbd>E</kbd> use power-up &nbsp; <kbd>Q</kbd> next power-up &nbsp; <kbd>C</kbd> camera</div>
-        <div><kbd>Esc</kbd> pause / change car &nbsp; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> graphics &nbsp; <kbd>F</kbd> auto-res &nbsp; <kbd>H</kbd> help</div>
+        <div><kbd>Esc</kbd> menu / change car / online &nbsp; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> graphics &nbsp; <kbd>F</kbd> auto-res &nbsp; <kbd>H</kbd> help</div>
       </div>
       <div class="hud-turn"><div class="arrow"></div><div class="txt"><div class="t1"></div><div class="t2"></div></div></div>
       <div class="hud-race">
@@ -151,6 +170,21 @@ export class Hud {
       else if (t.dataset.act === 'resume') this.onResume?.();
       else if (t.dataset.act === 'diff') this.onDifficulty?.(t.dataset.v!);
       else if (t.dataset.act === 'car') this.onCar?.(t.dataset.v!);
+      else if (t.dataset.act === 'net') {
+        const code = (this.results.querySelector('#net-code') as HTMLInputElement | null)?.value ?? '';
+        this.onOnline?.(t.dataset.v!, code.trim().toUpperCase());
+      }
+    });
+    this.results.addEventListener('change', (e) => {
+      const el = e.target as HTMLInputElement;
+      if (el.id === 'net-name') this.onOnline?.('name', el.value);
+    });
+    this.results.addEventListener('keydown', (e) => {
+      const el = e.target as HTMLInputElement;
+      if (e.key !== 'Enter' || el.tagName !== 'INPUT') return;
+      e.preventDefault();
+      if (el.id === 'net-code') this.onOnline?.('join', el.value.trim().toUpperCase());
+      else el.blur();
     });
     this.setRace(null);
     this.banner = root.querySelector('.hud-banner')!;
@@ -241,27 +275,72 @@ export class Hud {
     const cars = p.cars
       .map((c) => `<button data-act="car" data-v="${c.id}" class="car${c.id === p.car ? ' on' : ''}">${c.name}<small>${c.drive} · SPD ${c.stats.speed} · ACC ${c.stats.acceleration} · HDL ${c.stats.handling} · HP ${c.stats.health}</small></button>`)
       .join('');
-    const title = p.mode === 'pause' ? 'PAUSED' : `${p.place}<span>${ordinal(p.place ?? 0)}</span> PLACE`;
+    const o = p.online;
+    const inRoom = o.state === 'room';
+    const title = p.mode === 'pause' ? (inRoom && !o.racing ? `ROOM <span class="code">${esc(o.code ?? '')}</span>` : 'PAUSED') : `${p.place}<span>${ordinal(p.place ?? 0)}</span> PLACE`;
     const table = rows.length
       ? `<table><tr class="h"><td></td><td>DRIVER</td><td class="t">TIME</td><td class="t">BEST LAP</td><td class="t">WRECKED</td></tr>${body}</table>`
       : '';
-    const buttons = p.mode === 'pause'
-      ? `<div class="row2"><button class="go alt" data-act="resume">RESUME <small>ESC</small></button><button class="go" data-act="restart">RESTART <small>ENTER</small></button></div>`
-      : `<button class="go" data-act="restart">RACE AGAIN <small>ENTER</small></button>`;
+    const resume = `<button class="go alt" data-act="resume">${inRoom && !o.racing ? 'PRACTICE' : 'RESUME'} <small>ESC</small></button>`;
+    let buttons: string;
+    if (!inRoom) {
+      buttons = p.mode === 'pause'
+        ? `<div class="row2">${resume}<button class="go" data-act="restart">RESTART <small>ENTER</small></button></div>`
+        : `<button class="go" data-act="restart">RACE AGAIN <small>ENTER</small></button>`;
+    } else if (o.isHost && (p.mode === 'results' || !o.racing)) {
+      const go = `<button class="go" data-act="net" data-v="start">${p.mode === 'results' ? 'RACE AGAIN' : 'START RACE'} <small>ENTER</small></button>`;
+      buttons = p.mode === 'pause' ? `<div class="row2">${resume}${go}</div>` : go;
+    } else {
+      const wait = o.racing && p.mode === 'pause' ? '' : '<div class="wait">WAITING FOR THE HOST TO START…</div>';
+      buttons = p.mode === 'pause' ? `${wait}${resume}` : wait;
+    }
     const html = `
       <div class="panel">
         <div class="title">${title}</div>
         ${table}
-        <div class="opts"><span>AI</span>${diffs}</div>
+        ${inRoom && !o.isHost ? '' : `<div class="opts"><span>AI</span>${diffs}</div>`}
         <div class="opts cars"><span>CAR</span><div class="grid">${cars}</div></div>
         ${p.carNote ? `<div class="note">${p.carNote}</div>` : ''}
+        ${this.onlineHtml(o)}
         ${buttons}
       </div>`;
     if (this.resultsKey !== html) {
       this.resultsKey = html;
+      // re-rendering must not throw away what the player is typing
+      const focus = document.activeElement?.id;
+      const typed = new Map([...this.results.querySelectorAll('input')].map((el) => [el.id, el.value]));
       this.results.innerHTML = html;
+      for (const [id, v] of typed) {
+        const el = this.results.querySelector(`#${id}`) as HTMLInputElement | null;
+        if (el && (id === 'net-code' || el === document.activeElement || focus === id)) el.value = v;
+      }
+      if (focus) (this.results.querySelector(`#${focus}`) as HTMLInputElement | null)?.focus();
     }
     this.results.classList.add('show');
+  }
+
+  private onlineHtml(o: OnlinePanel) {
+    const name = `<input id="net-name" maxlength="14" placeholder="YOUR NAME" value="${esc(o.name)}" autocomplete="off" spellcheck="false">`;
+    if (o.state === 'off') {
+      return `<div class="online"><div class="oh">PLAY ONLINE</div>
+        <div class="orow">${name}<button data-act="net" data-v="create">CREATE ROOM</button></div>
+        <div class="orow"><input id="net-code" maxlength="8" placeholder="ROOM CODE" autocomplete="off" spellcheck="false"><button data-act="net" data-v="join">JOIN</button></div>
+        ${o.error ? `<div class="err">${esc(o.error)}</div>` : ''}</div>`;
+    }
+    if (o.state === 'connecting') return `<div class="online"><div class="oh">CONNECTING…</div></div>`;
+    const players = (o.players ?? [])
+      .map((pl) => `<li class="${pl.you ? 'me' : ''}"><b>${esc(pl.name)}</b><span>${esc(pl.car)}</span>${pl.host ? '<em>HOST</em>' : ''}</li>`)
+      .join('');
+    const host = o.isHost && !o.racing
+      ? `<div class="orow cfg"><span>AI CARS</span><button data-act="net" data-v="ai-">−</button><b>${o.ai}</b><button data-act="net" data-v="ai+">+</button>
+         <span>LAPS</span><button data-act="net" data-v="laps-">−</button><b>${o.laps}</b><button data-act="net" data-v="laps+">+</button></div>`
+      : '';
+    return `<div class="online"><div class="oh">ONLINE ROOM <b class="code">${esc(o.code ?? '')}</b>
+        <button data-act="net" data-v="copy">COPY LINK</button><button data-act="net" data-v="leave">LEAVE</button></div>
+      <div class="orow">${name}</div>
+      <ul class="players">${players}</ul>${host}
+      ${o.racing && !o.isHost ? '<div class="note">RACE IN PROGRESS — YOU JOIN THE NEXT ONE</div>' : ''}
+      ${o.error ? `<div class="err">${esc(o.error)}</div>` : ''}</div>`;
   }
 
   /** held power-ups (up to 3), the selected one highlighted */
