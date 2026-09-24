@@ -81,7 +81,7 @@ export class Pipeline {
     composer.addPass(new RenderPass(scene, camera));
 
     this.ao = undefined;
-    if (preset.ao) {
+    if (preset.ao && !new URLSearchParams(location.search).has('noao')) {
       const w = r.domElement.width, h = r.domElement.height;
       const ao = new N8AOPostPass(scene, camera, w, h);
       ao.configuration.aoRadius = 1.6;

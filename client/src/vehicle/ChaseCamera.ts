@@ -72,9 +72,10 @@ export class ChaseCamera {
     this.look.lerp(lookAt, damp(18, dt));
 
     // shake: engine/road at speed + impacts
-    const s = clamp(kmh / 280, 0, 1) * 0.018 + this.shake;
-    const sx = (Math.sin(this.t * 37.1) + Math.sin(this.t * 23.3)) * 0.5 * s;
-    const sy = (Math.sin(this.t * 41.7) + Math.sin(this.t * 17.9)) * 0.5 * s;
+    // (low frequencies: a 60 fps camera can't show fast buzz, it only turns into random smear)
+    const s = clamp(kmh / 280, 0, 1) * 0.012 + this.shake;
+    const sx = (Math.sin(this.t * 9.1) + Math.sin(this.t * 13.7)) * 0.5 * s;
+    const sy = (Math.sin(this.t * 11.3) + Math.sin(this.t * 7.9)) * 0.5 * s;
     this.shake = Math.max(0, this.shake - dt * 0.6);
 
     cam.position.copy(this.pos);

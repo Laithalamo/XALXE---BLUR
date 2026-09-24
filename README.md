@@ -3,8 +3,9 @@
 Arcade combat racing in the browser — realistic cars, city street circuits,
 weapon power-ups. Private game for friends on the same home WiFi.
 
-> **Status:** Solo race on the *Midtown Circuit*: you vs 7 AI cars, 3 laps, start lights,
-> positions, lap times, mini map, turn warnings, drift score. Power-ups and more cars are next.
+> **Status:** Solo combat race on the *Midtown Circuit*: you vs 7 AI cars, 3 laps, 7 power-ups,
+> health and wrecks, start lights, positions, lap times, mini map, turn warnings, drift score.
+> Next: more cars and tracks, menus, profiles, sound, LAN multiplayer.
 
 ## Run it (host PC)
 
@@ -33,7 +34,8 @@ Friends just open that second address in Chrome or Edge. No install needed.
 | **W / S** or ↑ / ↓ | Throttle / brake (hold S when stopped to reverse) |
 | **A / D** or ← / → | Steer |
 | **Space** | Handbrake — tap it in a corner to start a drift, hold throttle to keep it |
-| **Shift** | Test boost |
+| **E** | Use the selected power-up |
+| **Q** | Select the next power-up |
 | **R** | Reset car onto the road |
 | **C** | Change camera (chase, far, hood, bumper) |
 | **1 / 2 / 3** | Graphics: Low / Medium / High |
@@ -41,7 +43,8 @@ Friends just open that second address in Chrome or Edge. No install needed.
 | **H** | Hide the help box |
 | **Enter** | Race again (on the results screen) |
 
-Gamepads work too (RT/LT throttle/brake, left stick steer, A handbrake, Y reset, Start = race again).
+Gamepads work too (RT/LT throttle/brake, left stick steer, A handbrake, B use power-up,
+X/LB next power-up, Y reset, Start = race again).
 
 ## Racing
 
@@ -52,6 +55,25 @@ Gamepads work too (RT/LT throttle/brake, left stick steer, A handbrake, Y reset,
   boards mark the outside of every corner on the track too.
 - AI level (Easy / Medium / Hard) is picked on the results screen.
 - Free driving without opponents: add `?race=0` to the address.
+
+## Power-ups
+
+Glowing badges float over the road in groups of three — drive through one to take it
+(you can hold 3). The icon shows what it is:
+
+| Power-up | What it does |
+|---|---|
+| **Pulse** (violet) | Homing shot that chases the car ahead of you |
+| **Arc** (cyan) | Three fast bolts straight ahead (slight auto-aim) |
+| **Surge** (blue) | Nitro boost for 3 seconds |
+| **Trap** (orange) | Mine dropped behind you |
+| **Barrier** (green) | Shield: blocks the next 2 hits for 8 seconds |
+| **Patch** (pink) | Repairs 55% health |
+| **Storm** (yellow) | Lightning on up to 3 cars ahead of you |
+
+The green bar above your power-ups is your health. Hits and hard crashes cost health;
+at zero you're **wrecked** and come back on the road after ~3 seconds (power-ups lost).
+A violet **INCOMING** warning means a Pulse is chasing you — a Barrier blocks it.
 
 ## Graphics settings
 

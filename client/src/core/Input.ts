@@ -8,6 +8,8 @@ export class Input {
   readonly drive: DriveInput = { throttle: 0, brake: 0, steer: 0, handbrake: false, boost: false };
   enabled = true;
   private padStart = false;
+  private padUse = false;
+  private padNext = false;
 
   constructor() {
     addEventListener('keydown', (e) => {
@@ -33,7 +35,8 @@ export class Input {
     let brake = k.has('KeyS') || k.has('ArrowDown') ? 1 : 0;
     let steerTarget = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     let handbrake = k.has('Space');
-    let boost = k.has('ShiftLeft') || k.has('ShiftRight');
+    // nitro only comes from the Surge power-up (the game sets it)
+    let boost = false;
 
     let analogSteer: number | null = null;
     for (const pad of navigator.getGamepads?.() ?? []) {
@@ -43,8 +46,13 @@ export class Input {
       throttle = Math.max(throttle, pad.buttons[7]?.value ?? 0);
       brake = Math.max(brake, pad.buttons[6]?.value ?? 0);
       handbrake ||= !!pad.buttons[0]?.pressed || !!pad.buttons[5]?.pressed;
-      boost ||= !!pad.buttons[2]?.pressed;
       if (pad.buttons[3]?.pressed) this.pressed.add('KeyR');
+      // B = use power-up, X / LB = next power-up (edge-triggered)
+      const use = !!pad.buttons[1]?.pressed, next = !!pad.buttons[2]?.pressed || !!pad.buttons[4]?.pressed;
+      if (use && !this.padUse) this.pressed.add('KeyE');
+      if (next && !this.padNext) this.pressed.add('KeyQ');
+      this.padUse = use;
+      this.padNext = next;
       // Start: menu / race again (edge-triggered: held buttons don't repeat)
       const start = !!pad.buttons[9]?.pressed;
       if (start && !this.padStart) { this.pressed.add('Escape'); this.pressed.add('Enter'); }

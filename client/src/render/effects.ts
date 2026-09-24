@@ -13,6 +13,7 @@ uniform mat4 uPrevViewProj;
 uniform mat4 uCarInv[4];
 uniform mat4 uCarPrev[4];
 uniform vec3 uCarHalf[4];
+uniform float uCarBlur[4];
 uniform int uCarCount;
 uniform float uStrength;
 uniform float uMaxBlur;
@@ -23,17 +24,29 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   vec4 wp = uInvViewProj * ndc;
   vec3 world = wp.xyz / wp.w;
   vec3 prevWorld = world;
+  float hitCar = -1.0;
+  float carBlur = 1.0;
   for (int i = 0; i < 4; i++) {
     if (i >= uCarCount) break;
     vec3 lp = (uCarInv[i] * vec4(world, 1.0)).xyz;
-    if (all(lessThan(abs(lp - vec3(0.0, uCarHalf[i].y, 0.0)), uCarHalf[i]))) {
+    // box starts 8 cm above the ground so the road around the car still blurs
+    if (all(lessThan(abs(lp - vec3(0.0, uCarHalf[i].y + 0.08, 0.0)), uCarHalf[i]))) {
       prevWorld = (uCarPrev[i] * vec4(lp, 1.0)).xyz;
+      hitCar = float(i);
+      carBlur = uCarBlur[i];
       break;
     }
   }
+  #ifdef MB_DEBUG
+  { vec4 pc0 = uPrevViewProj * vec4(prevWorld, 1.0); vec2 pu = pc0.xy / pc0.w * 0.5 + 0.5; float v = length(uv - pu) * 40.0;
+    float du = length(uv - pu);
+    vec3 b = du < 0.001 ? vec3(0.0, 0.5, 0.0) : du < 0.003 ? vec3(0.5, 0.5, 0.0) : du < 0.01 ? vec3(0.5, 0.15, 0.0) : du < 0.03 ? vec3(0.5, 0.0, 0.0) : vec3(0.5, 0.0, 0.5);
+    outputColor = vec4(hitCar >= 0.0 ? b : b * 0.25, 1.0); return; }
+  #endif
   vec4 pc = uPrevViewProj * vec4(prevWorld, 1.0);
   vec2 prevUv = pc.xy / pc.w * 0.5 + 0.5;
-  vec2 vel = (uv - prevUv) * uStrength;
+  // cars: only a hint of their motion relative to the camera (the player's car stays crisp)
+  vec2 vel = (uv - prevUv) * uStrength * carBlur;
   float l = length(vel);
   // !(l < 10.0) also catches NaN (points behind last frame's camera)
   if (l < 0.0008 || !(l < 10.0) || pc.w <= 0.0) { outputColor = inputColor; return; }
@@ -56,6 +69,8 @@ export class MotionBlurEffect extends Effect {
   private prevViewProj = new THREE.Matrix4();
   private hasPrev = false;
   cars: { object: THREE.Object3D; half: THREE.Vector3; prev: THREE.Matrix4; has: boolean }[] = [];
+  private tmp = new THREE.Vector3();
+  private fwd = new THREE.Vector3();
 
   constructor() {
     super('MotionBlurEffect', MB_FRAG, {
@@ -67,10 +82,12 @@ export class MotionBlurEffect extends Effect {
         ['uCarInv', new THREE.Uniform([0, 1, 2, 3].map(() => new THREE.Matrix4()))],
         ['uCarPrev', new THREE.Uniform([0, 1, 2, 3].map(() => new THREE.Matrix4()))],
         ['uCarHalf', new THREE.Uniform([0, 1, 2, 3].map(() => new THREE.Vector3()))],
+        ['uCarBlur', new THREE.Uniform([0, 0, 0, 0])],
         ['uCarCount', new THREE.Uniform(0)],
         ['uStrength', new THREE.Uniform(0.5)],
         ['uMaxBlur', new THREE.Uniform(0.05)],
       ]),
+      defines: new URLSearchParams(location.search).has('mbdebug') ? new Map([['MB_DEBUG', '1']]) : undefined,
     });
   }
 
@@ -96,12 +113,16 @@ export class MotionBlurEffect extends Effect {
     for (const c of cand) c.object.updateMatrixWorld();
     const dist = (c: (typeof cand)[number]) => (c === this.cars[0] ? -1 : c.object.position.distanceToSquared(cam));
     cand.sort((a, b) => dist(a) - dist(b));
+    const blur = u.get('uCarBlur')!.value as number[];
     let n = 0;
     for (const c of cand) {
       if (n >= 4) break;
+      // skip cars behind the camera: they can't be on screen
+      if (c !== this.cars[0] && this.tmp.copy(c.object.position).sub(cam).dot(this.fwd.set(0, 0, -1).applyQuaternion(camera.quaternion)) < -3) continue;
       inv[n].copy(c.object.matrixWorld).invert();
       prev[n].copy(c.has ? c.prev : c.object.matrixWorld);
-      half[n].copy(c.half);
+      half[n].set(c.half.x, c.half.y - 0.04, c.half.z);
+      blur[n] = c === this.cars[0] ? 0 : 0.22;
       n++;
     }
     for (const c of this.cars) {

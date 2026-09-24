@@ -330,6 +330,11 @@ export class Effects {
     }
   }
 
+  /** one smoke puff (wrecks, exhaust...) */
+  puff(p: THREE.Vector3, v: THREE.Vector3, life: number, size0: number, size1: number, alpha: number) {
+    this.smoke.spawn(p, v, life, size0, size1, alpha);
+  }
+
   setLayer(layer: number) {
     for (const m of [this.skids.mesh, this.smoke.mesh, this.sparks.mesh]) m.layers.set(layer);
   }

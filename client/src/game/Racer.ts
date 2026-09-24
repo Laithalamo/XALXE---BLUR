@@ -23,6 +23,10 @@ export class Racer {
   readonly vel = new THREE.Vector3();
   readonly lastVel = new THREE.Vector3();
   input: DriveInput = emptyInput();
+  /** what the car actually gets this step (input + nitro, or nothing while wrecked) */
+  readonly cmd: DriveInput = emptyInput();
+  /** AI: seconds until it next considers using a power-up */
+  aiThink = 1;
   /** seconds flipped / off the road / not making progress */
   stuckTime = 0;
   noProgress = 0;

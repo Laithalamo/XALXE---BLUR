@@ -37,6 +37,8 @@ export class AIDriver {
   private reverseTime = 0;
   /** extra pace multiplier set by the race (rubber banding) */
   catchUp = 1;
+  /** a pickup to drive through (distance along the lap + lateral offset), set by the game */
+  seek: { s: number; lateral: number } | null = null;
   /** per-driver talent (+- a few percent) */
   readonly talent: number;
 
@@ -68,6 +70,13 @@ export class AIDriver {
           desiredShift = leftRoom > rightRoom ? 3.0 : -3.0;
         }
       }
+    }
+    // power-up pickup ahead: line up with it (traffic avoidance comes first)
+    if (this.seek && !blocked && desiredShift === 0) {
+      let ds = this.seek.s - me.s;
+      if (ds < -L / 2) ds += L;
+      if (ds > L / 2) ds -= L;
+      if (ds > 3 && ds < 20 + v * 1.3) desiredShift = clamp(this.seek.lateral - this.line.latAt(this.seek.s), -6.5, 6.5);
     }
     this.laneShift += (desiredShift - this.laneShift) * Math.min(1, dt * 1.8);
 

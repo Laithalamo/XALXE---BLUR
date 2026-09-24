@@ -1,6 +1,8 @@
 import type { Vehicle } from '@shared/physics/vehicle';
 import type { Corner } from '@shared/track/corners';
 import type { Quality } from '../core/Settings';
+import { POWERS, type PowerKind } from '@shared/race/powerups';
+import { powerIconUrl } from './powerIcons';
 
 const SEVERITY_LABEL: Record<Corner['severity'], string> = {
   kink: 'FLAT OUT', fast: 'FAST', medium: 'MEDIUM', sharp: 'SHARP', hairpin: 'HAIRPIN',
@@ -28,6 +30,8 @@ export interface ResultRow extends StandingRow {
   /** finish time (s), null = still racing */
   time: number | null;
   best: number | null;
+  /** cars this driver wrecked */
+  kills: number;
 }
 
 export const fmtTime = (t: number) => {
@@ -63,6 +67,14 @@ export class Hud {
   onDifficulty: ((d: string) => void) | null = null;
   readonly mapSlot: HTMLElement;
   readonly slotsEl: HTMLElement;
+  private healthFill: HTMLElement;
+  private healthText: HTMLElement;
+  private vignette: HTMLElement;
+  private incoming: HTMLElement;
+  private feedEl: HTMLElement;
+  private slotKey = '';
+  private healthKey = '';
+  private vig = 0;
   private toastTimer = 0;
   private helpTimer = 14;
   private fpsAcc = 0;
@@ -93,7 +105,13 @@ export class Hud {
       <div class="hud-toast"></div>
       <div class="hud-drift"></div>
       <div class="hud-mapslot"></div>
-      <div class="hud-slots"></div>
+      <div class="hud-vignette"></div>
+      <div class="hud-incoming">⚠ INCOMING</div>
+      <div class="hud-feed"></div>
+      <div class="hud-combat">
+        <div class="hud-health"><div class="fill"></div><span></span></div>
+        <div class="hud-slots"></div>
+      </div>
       <div class="hud-speed">
         <div class="v">0</div><div class="u">KM/H</div>
         <div class="g">GEAR <b>1</b></div>
@@ -124,6 +142,12 @@ export class Hud {
     this.banner = root.querySelector('.hud-banner')!;
     this.mapSlot = root.querySelector('.hud-mapslot')!;
     this.slotsEl = root.querySelector('.hud-slots')!;
+    this.healthFill = root.querySelector('.hud-health .fill')!;
+    this.healthText = root.querySelector('.hud-health span')!;
+    this.vignette = root.querySelector('.hud-vignette')!;
+    this.incoming = root.querySelector('.hud-incoming')!;
+    this.feedEl = root.querySelector('.hud-feed')!;
+    this.setSlots([], 0);
   }
 
   toggleHelp() {
@@ -189,7 +213,7 @@ export class Hud {
     const body = rows
       .map((r, i) => {
         const t = r.time === null ? '<span class="racing">RACING…</span>' : i === 0 || leader === null ? fmtTime(r.time) : `+${(r.time - leader).toFixed(2)}`;
-        return `<tr class="${r.isPlayer ? 'me' : ''}"><td class="p">${i + 1}</td><td><i style="background:${r.color}"></i>${r.name}</td><td class="t">${t}</td><td class="t">${r.best !== null ? fmtTime(r.best) : '--'}</td></tr>`;
+        return `<tr class="${r.isPlayer ? 'me' : ''}"><td class="p">${i + 1}</td><td><i style="background:${r.color}"></i>${r.name}</td><td class="t">${t}</td><td class="t">${r.best !== null ? fmtTime(r.best) : '--'}</td><td class="t">${r.kills || ''}</td></tr>`;
       })
       .join('');
     const diffs = ['easy', 'medium', 'hard']
@@ -198,7 +222,7 @@ export class Hud {
     const html = `
       <div class="panel">
         <div class="title">${playerPlace}<span>${ordinal(playerPlace)}</span> PLACE</div>
-        <table><tr class="h"><td></td><td>DRIVER</td><td class="t">TIME</td><td class="t">BEST LAP</td></tr>${body}</table>
+        <table><tr class="h"><td></td><td>DRIVER</td><td class="t">TIME</td><td class="t">BEST LAP</td><td class="t">WRECKED</td></tr>${body}</table>
         <div class="opts"><span>AI</span>${diffs}</div>
         <button class="go" data-act="restart">RACE AGAIN <small>ENTER</small></button>
       </div>`;
@@ -207,6 +231,52 @@ export class Hud {
       this.results.innerHTML = html;
     }
     this.results.classList.add('show');
+  }
+
+  /** held power-ups (up to 3), the selected one highlighted */
+  setSlots(kinds: PowerKind[], sel: number) {
+    const key = kinds.join(',') + '|' + sel;
+    if (key === this.slotKey) return;
+    this.slotKey = key;
+    let html = '';
+    for (let i = 0; i < 3; i++) {
+      const k = kinds[i];
+      if (!k) {
+        html += '<div class="slot empty"></div>';
+        continue;
+      }
+      html += `<div class="slot${i === sel ? ' active' : ''}" style="--c:${POWERS[k].color}"><img src="${powerIconUrl(k)}" alt=""><span class="nm">${POWERS[k].name}</span>${i === sel ? '<kbd>E</kbd>' : ''}</div>`;
+    }
+    this.slotsEl.innerHTML = html;
+  }
+
+  setHealth(frac: number, wrecked: boolean) {
+    const pct = Math.round(Math.max(0, Math.min(1, frac)) * 100);
+    const key = `${pct}${wrecked}`;
+    if (key === this.healthKey) return;
+    this.healthKey = key;
+    this.healthFill.style.width = `${pct}%`;
+    this.healthFill.style.background = pct > 55 ? '#4be37a' : pct > 28 ? '#ffc21a' : '#ff3b30';
+    this.healthText.textContent = wrecked ? 'WRECKED' : `${pct}`;
+  }
+
+  /** red screen-edge flash when the player takes damage (0..1) */
+  hurt(strength: number) {
+    this.vig = Math.min(1, Math.max(this.vig, strength));
+  }
+
+  setIncoming(on: boolean) {
+    this.incoming.classList.toggle('show', on);
+  }
+
+  /** short line in the event feed (hits, wrecks) */
+  feed(html: string) {
+    const d = document.createElement('div');
+    d.innerHTML = html;
+    this.feedEl.prepend(d);
+    while (this.feedEl.children.length > 4) this.feedEl.lastElementChild!.remove();
+    setTimeout(() => d.classList.add('out'), 3800);
+    setTimeout(() => d.remove(), 4400);
   }
 
   /** upcoming corner warning; pass null to hide */
@@ -258,6 +328,10 @@ export class Hud {
     if (this.toastTimer > 0) {
       this.toastTimer -= dt;
       if (this.toastTimer <= 0) this.toastEl.classList.remove('show');
+    }
+    if (this.vig > 0) {
+      this.vig = Math.max(0, this.vig - dt * 2.2);
+      this.vignette.style.opacity = this.vig.toFixed(3);
     }
     if (this.helpTimer > 0 && this.helpTimer < 1e8) {
       this.helpTimer -= dt;

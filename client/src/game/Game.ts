@@ -8,6 +8,7 @@ import { createTrackWorld, spawnAt, PHYSICS_HZ } from '@shared/physics/trackPhys
 import { Vehicle, emptyInput, type DriveInput } from '@shared/physics/vehicle';
 import { AIDriver } from '@shared/ai/driver';
 import { Race, gridSlot } from '@shared/race/race';
+import { Combat, POWERS, type CombatEvent } from '@shared/race/powerups';
 import { CARS, DEFAULT_CAR } from '@shared/cars';
 import { clamp, rng } from '@shared/math';
 import { Assets } from '../core/Assets';
@@ -29,6 +30,7 @@ import { ChaseCamera } from '../vehicle/ChaseCamera';
 import { Hud, type ResultRow } from '../ui/Hud';
 import { Minimap, type MapBlip } from '../ui/Minimap';
 import { Effects } from '../fx/Effects';
+import { CombatView } from '../fx/CombatView';
 import { CarReflections, DETAIL_LAYER } from '../render/Reflections';
 import { Racer, type RacerInfo } from './Racer';
 
@@ -78,6 +80,10 @@ export class Game {
   /** drives the player's car after the finish line */
   private playerAI!: AIDriver;
   private race!: Race;
+  private combat!: Combat;
+  private combatView!: CombatView;
+  private vehicles: Vehicle[] = [];
+  private fullToast = 0;
   private startLights: THREE.MeshStandardMaterial[] = [];
   private difficulty: AIDifficulty = loadDifficulty();
   private chase = new ChaseCamera(this.camera);
@@ -162,6 +168,8 @@ export class Game {
     this.fx = new Effects(this.scene, this.assets, preset.particles);
     await this.fx.init();
     this.fx.setLayer(DETAIL_LAYER);
+    this.combatView = new CombatView(this.scene, this.fx, this.racers.length);
+    this.combatView.setLayer(DETAIL_LAYER);
     this.setReflections(preset.dynamicReflections);
     this.minimap = new Minimap(this.cl, this.def.roadWidth);
     this.hud.mapSlot.appendChild(this.minimap.el);
@@ -189,7 +197,41 @@ export class Game {
     this.pipeline.motionBlur.resetHistory();
     const warp = Number(this.params.get('warp') ?? 0);
     if (warp > 0) this.warp(warp);
+    if (this.params.has('demo')) this.combatDemo();
     progress(1, 'ready');
+  }
+
+  /** ?demo: fill the screen with combat effects (for checking the visuals in screenshots) */
+  private combatDemo() {
+    const c = this.combat;
+    const i = this.player.index;
+    const me = c.cars[i];
+    me.shield = 8;
+    me.shieldHits = 2;
+    me.surge = 3;
+    me.slots = ['pulse', 'storm', 'arc'];
+    me.sel = 0;
+    const order = this.race.standings();
+    const ahead = order[order.indexOf(i) - 1];
+    c.use(i, this.vehicles, this.race.racers, order);
+    const s = c.shots[c.shots.length - 1];
+    if (s) {
+      // show it half way to its target
+      const tp = this.racers[ahead]?.curPos;
+      if (tp) {
+        s.x = (s.x + tp.x) / 2;
+        s.z = (s.z + tp.z) / 2;
+      }
+    }
+    const p = this.player.curPos, q = this.player.curQuat;
+    const back = new THREE.Vector3(0, 0, 9).applyQuaternion(q);
+    c.mines.push({ id: 999, owner: i, x: p.x + back.x, y: 0.12, z: p.z + back.z, arm: 0, life: 30, age: 5 });
+    if (ahead !== undefined) {
+      const t = this.racers[ahead].curPos;
+      this.combatView.onEvent({ t: 'strike', car: ahead, by: i, x: t.x, y: t.y, z: t.z }, this.racers);
+    }
+    me.slots = ['storm', 'arc'];
+    this.drainCombat();
   }
 
   /** player + AI cars on the grid (or the player alone in free mode) */
@@ -235,6 +277,8 @@ export class Game {
     }
     this.playerAI = new AIDriver(this.cl, this.line, this.def.roadWidth, 'medium', 99);
     this.setReactions();
+    this.vehicles = this.racers.map((rc) => rc.vehicle);
+    this.combat = new Combat(this.cl, this.def.roadWidth, this.corners, count, spec.maxHealth);
   }
 
   private setReactions() {
@@ -266,23 +310,85 @@ export class Game {
     const race = this.race;
     const go = race.started && advance;
     const states = go ? this.racers.map((rc) => rc.aiState(race.racers[rc.index])) : null;
+    const combat = this.combat;
     for (const rc of this.racers) {
       let inp = HOLD;
-      if (states) {
+      const cc = combat.cars[rc.index];
+      if (states && cc.wreck <= 0) {
         const aiDriven = !rc.isPlayer || race.racers[rc.index].finished || this.aiPilot;
         if (!aiDriven) inp = playerDrive;
         else if (race.time >= rc.reaction) inp = (rc.ai ?? this.playerAI).update(PHYS_DT, states[rc.index], states, race.time);
       }
       rc.input = inp;
+      Object.assign(rc.cmd, inp);
+      rc.cmd.boost = cc.surge > 0;
       rc.savePrev();
-      rc.vehicle.step(PHYS_DT, inp);
+      rc.vehicle.step(PHYS_DT, rc.cmd);
     }
     this.world.step();
     for (const rc of this.racers) {
       rc.sync();
       race.track(rc.index, rc.curPos.x, rc.curPos.z);
     }
+    if (go) {
+      combat.step(PHYS_DT, this.vehicles, race.racers);
+      this.drainCombat();
+    }
     if (advance) race.step(PHYS_DT);
+  }
+
+  /** react to combat events: respawns, HUD feedback, visuals */
+  private drainCombat() {
+    const ev = this.combat.events;
+    if (!ev.length) return;
+    const pl = this.player.index;
+    const name = (i: number) => `<b style="color:${this.racers[i].info.mapColor}">${this.racers[i].info.name}</b>`;
+    for (const e of ev.splice(0)) {
+      this.combatView.onEvent(e, this.racers);
+      this.onCombatEvent(e, pl, name);
+    }
+  }
+
+  private onCombatEvent(e: CombatEvent, pl: number, name: (i: number) => string) {
+    switch (e.t) {
+      case 'pickup':
+        if (e.car === pl) this.hud.toast(POWERS[e.kind].name, 1.0);
+        break;
+      case 'full':
+        if (e.car === pl && this.combat.time - this.fullToast > 3) {
+          this.fullToast = this.combat.time;
+          this.hud.toast('SLOTS FULL', 1.0);
+        }
+        break;
+      case 'hit':
+        if (e.car === pl) {
+          this.hud.hurt(0.35 + e.damage / 45);
+          this.chase.shake = Math.min(0.35, 0.08 + e.damage * 0.006);
+        }
+        if (e.kind !== 'crash' && e.by >= 0 && (e.car === pl || e.by === pl)) this.hud.feed(`${name(e.by)} ${POWERS[e.kind].name} ${name(e.car)}`);
+        break;
+      case 'block':
+        if (e.car === pl) this.hud.toast('BLOCKED', 0.8);
+        break;
+      case 'warn':
+        if (e.car === pl) this.hud.toast('⚡ LIGHTNING!', 1.0);
+        break;
+      case 'wreck': {
+        const rc = this.racers[e.car];
+        rc.view.setPaint(0x161616);
+        this.hud.feed(e.by >= 0 ? `${name(e.by)} wrecked ${name(e.car)}` : `${name(e.car)} wrecked`);
+        if (e.car === pl) this.hud.hurt(1);
+        break;
+      }
+      case 'respawn': {
+        const rc = this.racers[e.car];
+        rc.view.setPaint(rc.info.paint);
+        this.respawn(rc);
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   private autopilotInput(): DriveInput {
@@ -354,6 +460,9 @@ export class Game {
     for (const [k, q] of [['Digit1', 'low'], ['Digit2', 'medium'], ['Digit3', 'high']] as const) {
       if (inp.wasPressed(k)) this.setQuality(q);
     }
+    const plDone = this.race.racers[this.player.index].finished;
+    if (inp.wasPressed('KeyE') && this.race.started && !plDone) this.usePower();
+    if (inp.wasPressed('KeyQ')) this.combat.cycle(this.player.index);
     const enter = inp.wasPressed('Enter') || inp.wasPressed('NumpadEnter');
     if (enter && this.resultsUp()) this.restartRace();
     const drive = this.autopilot ? this.autopilotInput() : this.shotMode ? emptyInput() : inp.drive;
@@ -382,6 +491,7 @@ export class Game {
     this.env.update(dt, focus, this.camera);
     const cam = this.camera.position;
     for (const rc of this.racers) this.fx.car(dt, rc.index, rc.vehicle, rc.quat, rc.pos.distanceToSquared(cam) < 110 * 110);
+    this.combatView.update(dt, this.combat, this.racers, (i) => this.wreckSmoke(i, dt));
     this.fx.update(dt);
     this.pipeline.speedFx = clamp((Math.abs(pl.vehicle.speed) - 30) / 50, 0, 1);
     this.updateCountdown();
@@ -398,8 +508,55 @@ export class Game {
     else if (this.shotMode && this.frames === Number(this.params.get('frames') ?? 8)) (window as unknown as { __shotReady: boolean }).__shotReady = true;
   }
 
+  private usePower() {
+    const i = this.player.index;
+    const cc = this.combat.cars[i];
+    if (!cc.slots.length || cc.wreck > 0) return;
+    const kind = cc.slots[cc.sel];
+    if (!this.combat.use(i, this.vehicles, this.race.racers, this.race.standings())) {
+      this.hud.toast(kind === 'storm' ? 'NO ONE AHEAD' : kind === 'patch' ? 'HEALTH FULL' : 'NOT NOW', 1.0);
+    }
+    this.drainCombat();
+  }
+
   private resultsUp() {
     return this.finishedAt >= 0 && this.race.time - this.finishedAt > 2.5;
+  }
+
+  private smokeAcc = new Map<number, number>();
+  private wreckSmoke(i: number, dt: number) {
+    const rc = this.racers[i];
+    let a = (this.smokeAcc.get(i) ?? 0) + dt * 14;
+    while (a > 1) {
+      a -= 1;
+      const p = rc.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 0.9, (Math.random() - 0.5) * 2));
+      this.fx.puff(p, new THREE.Vector3((Math.random() - 0.5) * 0.8, 2 + Math.random(), (Math.random() - 0.5) * 0.8), 2.2, 0.8, 3.4, 0.28);
+    }
+    this.smokeAcc.set(i, a);
+  }
+
+  /** AI: every so often, use a held power-up if the situation fits */
+  private static THINK: Record<AIDifficulty, { every: number; chance: number }> = {
+    easy: { every: 1.6, chance: 0.5 },
+    medium: { every: 0.9, chance: 0.8 },
+    hard: { every: 0.5, chance: 1 },
+  };
+
+  private aiPowers(rc: Racer, dt: number) {
+    const race = this.race;
+    if (!race.started || race.racers[rc.index].finished) return;
+    // drive through power-ups while there is room for more
+    const driver = rc.ai ?? this.playerAI;
+    const pk = this.combat.cars[rc.index].slots.length < 3 ? this.combat.pickupAhead(race.racers[rc.index].s, this.cl.length) : null;
+    driver.seek = pk ? { s: pk.s, lateral: pk.lateral } : null;
+    rc.aiThink -= dt;
+    if (rc.aiThink > 0) return;
+    const th = Game.THINK[this.difficulty];
+    rc.aiThink = th.every * (0.6 + Math.random() * 0.8);
+    if (Math.random() > th.chance) return;
+    const pr = race.racers[rc.index];
+    const nc = nextCorner(this.corners, this.cl.length, pr.s);
+    if (this.combat.aiUse(rc.index, this.vehicles, race.racers, race.standings(), this.cl.length, nc ? nc.distance : 999)) this.drainCombat();
   }
 
   /** impacts, rubber banding, respawns */
@@ -410,6 +567,7 @@ export class Game {
     const plProg = race.progress(pl.index);
     const cam = this.camera.position;
     for (const rc of this.racers) {
+      if (rc.ai || (rc.isPlayer && this.aiPilot)) this.aiPowers(rc, dt);
       const lv = rc.vehicle.body.linvel();
       rc.vel.set(lv.x, lv.y, lv.z);
       const dv = rc.vel.distanceTo(rc.lastVel);
@@ -422,6 +580,12 @@ export class Game {
       const pr = race.racers[rc.index];
       // rubber banding: cars far ahead of the player ease off, cars far behind push a little harder
       if (rc.ai) rc.ai.catchUp = plDone || !this.raceMode ? 1 : clamp(1 - (race.progress(rc.index) - plProg) * 0.0004, 0.94, 1.07);
+      // wrecked cars come back by themselves (combat timer)
+      if (this.combat.cars[rc.index].wreck > 0) {
+        rc.stuckTime = 0;
+        rc.noProgress = 0;
+        continue;
+      }
       // flipped or off the road -> put back on track
       const off = Math.abs(pr.lateral) > this.def.roadWidth / 2 + 2.5;
       if (rc.vehicle.isUpsideDown() || off) rc.stuckTime += dt;
@@ -465,12 +629,20 @@ export class Game {
     const v = pl.vehicle;
     this.hud.update(dt, v, this.quality, this.def.name, this.pipeline.renderer.info.render.calls, this.pipeline.scale, this.autoRes);
 
-    // banner: countdown > finish > wrong way
+    const cc = this.combat.cars[pl.index];
+    this.hud.setSlots(cc.slots, cc.sel);
+    this.hud.setHealth(cc.health / cc.maxHealth, cc.wreck > 0);
+    this.hud.setIncoming(this.combat.incoming(pl.index));
+
+    // banner: countdown > finish > wrecked > wrong way
     const t = race.time;
     let banner = '', color = '#ffffff';
     if (this.raceMode && t < 1 && t >= -3) {
       banner = t < -2 ? '3' : t < -1 ? '2' : t < 0 ? '1' : 'GO!';
       color = t < 0 ? '#ffffff' : '#3dff6a';
+    } else if (cc.wreck > 0) {
+      banner = 'WRECKED';
+      color = '#ff3b30';
     } else if (this.finishedAt >= 0 && t - this.finishedAt < 2.5) {
       banner = 'FINISH';
     } else if (race.started && !pr.finished) {
@@ -493,6 +665,9 @@ export class Game {
     // mini map (rotates with the car: heading = yaw around +Y, forward = -Z)
     const yaw = Math.atan2(-fwdX(pl.quat), -fwdZ(pl.quat));
     this.blips.length = 0;
+    for (const p of this.combat.pickups) {
+      if (p.cooldown <= 0) this.blips.push({ x: p.x, z: p.z, color: POWERS[p.kind].color, kind: 'pickup' });
+    }
     for (const rc of this.racers) {
       if (rc !== pl) this.blips.push({ x: rc.pos.x, z: rc.pos.z, color: rc.info.mapColor, kind: 'car' });
     }
@@ -523,7 +698,7 @@ export class Game {
     const rows: ResultRow[] = race.standings().map((i) => {
       const r = race.racers[i];
       const rc = this.racers[i];
-      return { name: rc.info.name, color: rc.info.mapColor, isPlayer: rc.isPlayer, time: r.finished ? r.finishTime : null, best: r.bestLap };
+      return { name: rc.info.name, color: rc.info.mapColor, isPlayer: rc.isPlayer, time: r.finished ? r.finishTime : null, best: r.bestLap, kills: this.combat.cars[i].stats.kills };
     });
     this.hud.setResults(rows, this.difficulty, race.finishOrder.indexOf(this.player.index) + 1);
   }
@@ -546,6 +721,9 @@ export class Game {
     this.lampState = '';
     this.acc = 0;
     this.hud.setResults(null);
+    this.combat.reset();
+    this.combatView.clear();
+    for (const rc of this.racers) rc.view.setPaint(rc.info.paint);
     this.fx.clearAll();
     this.pipeline.motionBlur.resetHistory();
     this.chase.snap();
