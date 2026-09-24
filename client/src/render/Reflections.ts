@@ -39,15 +39,18 @@ export class CarReflections {
     renderer.shadowMap.autoUpdate = false;
     const wasVisible = car.visible;
     car.visible = false;
+    let wrapped = false;
     for (let k = 0; k < facesPerFrame; k++) {
       renderer.setRenderTarget(this.target, this.face);
       renderer.render(scene, cams[this.face]);
       this.face = (this.face + 1) % 6;
+      if (this.face === 0) wrapped = true;
     }
     car.visible = wasVisible;
     renderer.shadowMap.autoUpdate = autoShadow;
     renderer.setRenderTarget(prevTarget, prevFace, prevMip);
-    this.target.texture.needsPMREMUpdate = true;
+    // re-filter (PMREM) only once per full cube, not every frame
+    if (wrapped) this.target.texture.needsPMREMUpdate = true;
   }
 
   /** fill all six faces at once (e.g. after a respawn) */

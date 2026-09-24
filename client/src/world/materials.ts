@@ -139,7 +139,7 @@ export async function createWorldMaterials(assets: Assets): Promise<WorldMateria
   }, 'barrier');
 
   const pavers = new THREE.MeshStandardMaterial({
-    map: pav.map, normalMap: pav.normal, roughnessMap: pav.orm, aoMap: pav.orm, roughness: 1, metalness: 0,
+    map: pav.map, normalMap: pav.normal, roughnessMap: pav.orm, aoMap: pav.orm, roughness: 1, metalness: 0, vertexColors: true,
   });
   patch(pavers, {
     uniforms: { uNoise },
@@ -182,7 +182,7 @@ export async function createWorldMaterials(assets: Assets): Promise<WorldMateria
   const metal = new THREE.MeshStandardMaterial({ color: 0x8a8d91, metalness: 0.85, roughness: 0.38 });
   const darkMetal = new THREE.MeshStandardMaterial({ color: 0x24272b, metalness: 0.6, roughness: 0.5 });
   const roof = new THREE.MeshStandardMaterial({
-    map: conc.map, normalMap: conc.normal, color: 0x5e5c58, roughness: 0.95, metalness: 0,
+    map: conc.map, normalMap: conc.normal, vertexColors: true, roughness: 0.9, metalness: 0,
   });
   const lampGlow = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2d8, emissiveIntensity: 0.4, roughness: 0.3 });
 

@@ -8,14 +8,14 @@ import { CARS, DEFAULT_CAR } from '@shared/cars';
 import { clamp } from '@shared/math';
 import { Assets } from '../core/Assets';
 import { Input } from '../core/Input';
-import { PRESETS, loadQuality, saveQuality, type Quality } from '../core/Settings';
+import { PRESETS, loadQuality, saveQuality, loadAutoRes, saveAutoRes, type Quality } from '../core/Settings';
 import { Pipeline } from '../render/Pipeline';
 import { Environment, THEMES } from '../render/Environment';
 import { createWorldMaterials } from '../world/materials';
 import { createFacadeMaterial } from '../world/FacadeMaterial';
 import { buildCity } from '../world/City';
 import { buildTrackView } from '../world/TrackView';
-import { buildProps } from '../world/Props';
+import { buildProps, updateTreeLod, type TreeCell } from '../world/Props';
 import { CarView } from '../vehicle/CarView';
 import { makeShopSignAtlas } from '../world/banners';
 import { ChaseCamera } from '../vehicle/ChaseCamera';
@@ -33,6 +33,16 @@ export class Game {
   private assets = new Assets();
   private input = new Input();
   private quality: Quality = loadQuality();
+  private facadeMat!: THREE.MeshStandardMaterial;
+  private treeCells: TreeCell[] = [];
+  // auto resolution: keeps the frame rate up by lowering render resolution
+  private autoRes = loadAutoRes();
+  private resTimer = 0;
+  private resFrames = 0;
+  private resTime = 0;
+  private goodSecs = 0;
+  private upBlockedUntil = 0;
+  private clock = 0;
   private def: TrackDef = TRACKS.midtown;
   private cl!: Centerline;
   private world!: RAPIER.World;
@@ -82,6 +92,8 @@ export class Game {
       this.env.load(theme, preset.shadowMapSize, preset.shadowDistance),
     ]);
     facade.uniforms.uNight.value = this.def.theme === 'night' ? 1 : 0;
+    this.facadeMat = facade.material;
+    this.applyFacadeDetail(preset.facadeDetail);
 
     progress(0.7, 'building city');
     this.cl = buildCenterline(this.def);
@@ -90,10 +102,16 @@ export class Game {
     const track = buildTrackView(this.def, this.cl, mats);
     this.scene.add(track.group);
     const props = buildProps(city.props, mats);
+    this.treeCells = props.treeCells;
     props.group.traverse((o) => o.layers.set(DETAIL_LAYER));
     this.scene.add(props.group);
     this.camera.layers.enable(DETAIL_LAYER);
 
+    // the city never moves: skip per-frame matrix work for its ~1000 objects
+    for (const g of [city.group, track.group, props.group]) {
+      g.updateMatrixWorld(true);
+      g.traverse((o) => { o.matrixAutoUpdate = false; });
+    }
     progress(0.85, 'car');
     this.world = createTrackWorld(this.def, this.cl);
     const spec = CARS[DEFAULT_CAR];
@@ -119,7 +137,13 @@ export class Game {
     this.prevQuat.copy(this.curQuat);
     this.chase.snap();
     this.reflections?.prime(this.pipeline.renderer, this.scene, this.carView.root, this.curPos);
-    this.pipeline.renderer.compile(this.scene, this.camera);
+    // compile every shader up front (in parallel where the browser supports it), then render
+    // a couple of hidden frames so post-processing and shadow shaders are warm: no hitching later
+    progress(0.92, 'preparing shaders');
+    await this.pipeline.renderer.compileAsync(this.scene, this.camera);
+    this.chase.update(1 / 60, this.curPos, this.curQuat, new THREE.Vector3(), 0);
+    for (let i = 0; i < 2; i++) this.pipeline.render(1 / 60, 0);
+    this.pipeline.motionBlur.resetHistory();
     const warp = Number(this.params.get('warp') ?? 0);
     if (warp > 0) this.warp(warp);
     progress(1, 'ready');
@@ -183,13 +207,42 @@ export class Game {
     for (let t = 0; t < seconds; t += dt) this.frame(dt, false);
   }
 
+  /** ?bench=N : time N rendered frames (GPU work forced with gl.finish) */
+  private bench = Number(this.params.get('bench') ?? 0);
+  private benchTimes: number[] = [];
+  private benchStart = 0;
+  private benchFrame() {
+    const gl = this.pipeline.renderer.getContext();
+    gl.finish();
+    const now = performance.now();
+    if (this.benchStart > 0 && this.frames > 3) this.benchTimes.push(now - this.benchStart);
+    this.pipeline.profileOn = this.frames >= 3;
+    this.benchStart = now;
+    if (this.benchTimes.length >= this.bench) {
+      const t = [...this.benchTimes].sort((a, b) => a - b);
+      const avg = t.reduce((a, b) => a + b, 0) / t.length;
+      const info = this.pipeline.renderer.info.render;
+      const prof = Object.fromEntries(Object.entries(this.pipeline.profile).map(([k, v]) => [k, +(v / this.benchTimes.length).toFixed(0)]));
+      (window as unknown as { __bench: unknown }).__bench = { avg: +avg.toFixed(1), p90: +t[Math.floor(t.length * 0.9)].toFixed(1), calls: info.calls, tris: info.triangles, prof };
+      (window as unknown as { __shotReady: boolean }).__shotReady = true;
+    }
+  }
+
+  private frameStartT = 0;
   private frame(dt: number, render = true) {
     if (render) this.frames++;
+    this.frameStartT = performance.now();
     const inp = this.input;
     inp.update(dt);
     if (inp.wasPressed('KeyC')) this.chase.cycle();
     if (inp.wasPressed('KeyH')) this.hud.toggleHelp();
     if (inp.wasPressed('KeyR')) this.respawn();
+    if (inp.wasPressed('KeyF')) {
+      this.autoRes = !this.autoRes;
+      saveAutoRes(this.autoRes);
+      if (!this.autoRes) this.pipeline.setScale(1);
+      this.hud.toast(`AUTO RESOLUTION: ${this.autoRes ? 'ON' : 'OFF'}`);
+    }
     for (const [k, q] of [['Digit1', 'low'], ['Digit2', 'medium'], ['Digit3', 'high']] as const) {
       if (inp.wasPressed(k)) this.setQuality(q);
     }
@@ -233,10 +286,28 @@ export class Game {
     this.fx.update(dt, this.car, this.carView, this.lerpQuat);
     this.pipeline.speedFx = clamp((Math.abs(this.car.speed) - 30) / 50, 0, 1);
     if (!render) return;
-    this.reflections?.update(this.pipeline.renderer, this.scene, this.carView.root, this.lerpPos, this.shotMode ? 6 : 2);
+    if (this.frames % 6 === 1 || this.shotMode) {
+      const p = PRESETS[this.quality];
+      updateTreeLod(this.treeCells, this.camera.position, focus, p.treeDistance, p.shadowDistance, p.treeShadows);
+    }
+    const gl = this.bench > 0 ? this.pipeline.renderer.getContext() : null;
+    gl?.finish();
+    const tA = performance.now();
+    this.reflections?.update(this.pipeline.renderer, this.scene, this.carView.root, this.lerpPos, this.shotMode && this.bench === 0 ? 6 : 1);
+    gl?.finish();
+    const tB = performance.now();
     this.pipeline.render(this.shotMode ? 1 / 60 : dt, 0.55);
-    this.hud.update(dt, this.car, this.quality, this.def.name, this.pipeline.renderer.info.render.calls);
-    if (this.shotMode && this.frames === Number(this.params.get('frames') ?? 8)) (window as unknown as { __shotReady: boolean }).__shotReady = true;
+    gl?.finish();
+    if (gl && this.frames > 3) {
+      const pr = this.pipeline.profile;
+      pr['_probe'] = (pr['_probe'] ?? 0) + tB - tA;
+      pr['_composer'] = (pr['_composer'] ?? 0) + performance.now() - tB;
+      pr['_frameStartToProbe'] = (pr['_frameStartToProbe'] ?? 0) + tA - this.frameStartT;
+    }
+    this.hud.update(dt, this.car, this.quality, this.def.name, this.pipeline.renderer.info.render.calls, this.pipeline.scale, this.autoRes);
+    if (this.autoRes) this.updateAutoRes(dt);
+    if (this.bench > 0) this.benchFrame();
+    else if (this.shotMode && this.frames === Number(this.params.get('frames') ?? 8)) (window as unknown as { __shotReady: boolean }).__shotReady = true;
   }
 
   /** ?cam=x,y,z,tx,ty,tz  (world) or ?orbit=angle,dist,height for beauty screenshots */
@@ -278,6 +349,46 @@ export class Game {
     this.fx.clearTrails();
   }
 
+  /**
+   * Auto resolution: measure the real frame rate every second. Below ~56 FPS the
+   * render resolution drops a step (down to 55%); after a long smooth stretch
+   * it tries one step back up, and stays lower for a while if that was too much.
+   */
+  private updateAutoRes(dt: number) {
+    this.clock += dt;
+    this.resFrames++;
+    this.resTime += dt;
+    if (this.resTime < 1) return;
+    const fps = this.resFrames / this.resTime;
+    this.resFrames = 0;
+    this.resTime = 0;
+    const pl = this.pipeline;
+    if (fps < 55.5 && pl.scale > 0.56) {
+      const next = Math.max(0.55, +(pl.scale - (fps < 40 ? 0.15 : 0.08)).toFixed(2));
+      pl.setScale(next);
+      this.goodSecs = 0;
+      this.upBlockedUntil = this.clock + 20;
+    } else if (fps >= 58) {
+      this.goodSecs++;
+      if (pl.scale < 1 && this.goodSecs >= 6 && this.clock > this.upBlockedUntil) {
+        pl.setScale(Math.min(1, +(pl.scale + 0.05).toFixed(2)));
+        this.goodSecs = 0;
+        this.upBlockedUntil = this.clock + 4;
+      }
+    } else this.goodSecs = 0;
+  }
+
+  private applyFacadeDetail(detail: 'low' | 'high') {
+    const m = this.facadeMat;
+    const defs = (m.defines ??= {});
+    const want = detail === 'low';
+    if (want === 'FACADE_SIMPLE' in defs) return;
+    if (want) defs.FACADE_SIMPLE = '';
+    else delete defs.FACADE_SIMPLE;
+    m.customProgramCacheKey = () => (want ? 'facade-simple' : 'facade');
+    m.needsUpdate = true;
+  }
+
   private setReflections(on: boolean) {
     if (on && !this.reflections) this.reflections = new CarReflections(256);
     if (!on && this.reflections) { this.reflections.dispose(); this.reflections = null; }
@@ -295,6 +406,7 @@ export class Game {
     this.pipeline.motionBlur.track(this.carView.root, this.carView.half);
     this.setReflections(preset.dynamicReflections);
     this.reflections?.prime(this.pipeline.renderer, this.scene, this.carView.root, this.curPos);
+    this.applyFacadeDetail(preset.facadeDetail);
     this.hud.toast(`GRAPHICS: ${q.toUpperCase()}`);
   }
 }

@@ -5,10 +5,30 @@ import type { PropSpot } from './City';
 import type { WorldMaterials } from './materials';
 
 /** Instanced street furniture: lamps, traffic lights, benches, bins and trees. */
+export interface TreeCell {
+  center: THREE.Vector3;
+  meshes: THREE.InstancedMesh[];
+}
+
 export interface PropsResult {
   group: THREE.Group;
   lampHeads: THREE.Vector3[]; // world positions of lamp bulbs (for night lighting)
   trees: THREE.InstancedMesh[];
+  treeCells: TreeCell[];
+}
+
+/** hide far tree groups and keep shadows only for the ones near the car */
+export function updateTreeLod(cells: TreeCell[], cam: THREE.Vector3, shadowFocus: THREE.Vector3, maxDist: number, shadowDist: number, shadows: boolean) {
+  for (const c of cells) {
+    const d = Math.hypot(c.center.x - cam.x, c.center.z - cam.z);
+    const visible = d < maxDist + 110;
+    const ds = Math.hypot(c.center.x - shadowFocus.x, c.center.z - shadowFocus.z);
+    const cast = shadows && ds < shadowDist * 0.5 + 115;
+    for (const m of c.meshes) {
+      m.visible = visible;
+      m.castShadow = cast;
+    }
+  }
 }
 
 function cyl(r0: number, r1: number, h: number, seg = 10) {
@@ -101,11 +121,11 @@ function treeVariants() {
     const o = tree.options;
     const sections = o.branch.sections as Record<string, number>;
     const segments = o.branch.segments as Record<string, number>;
-    for (const k of Object.keys(sections)) sections[k] = Math.max(2, Math.round(sections[k] * 0.55));
-    for (const k of Object.keys(segments)) segments[k] = Math.max(3, Math.round(segments[k] * 0.6));
-    o.leaves.count = Math.max(4, Math.round(o.leaves.count * 0.5));
+    for (const k of Object.keys(sections)) sections[k] = Math.max(2, Math.round(sections[k] * 0.45));
+    for (const k of Object.keys(segments)) segments[k] = Math.max(3, Math.round(segments[k] * 0.5));
+    o.leaves.count = Math.max(4, Math.round(o.leaves.count * 0.36));
     if (o.leaves.type === 'aspen') o.leaves.type = 'ash' as typeof o.leaves.type; // summer: green leaves only
-    o.leaves.size *= 1.35;
+    o.leaves.size *= 1.55;
     o.seed = seed;
     tree.generate();
     const bb = new THREE.Box3().setFromObject(tree);
@@ -168,7 +188,7 @@ export function buildProps(spots: PropSpot[], mats: WorldMaterials): PropsResult
   const tg = trafficLightGeometry();
   const black = new THREE.MeshStandardMaterial({ color: 0x15171a, metalness: 0.4, roughness: 0.55 });
   group.add(instanced(tg.pole, pole, tl));
-  group.add(instanced(tg.head, black, tl));
+  group.add(instanced(tg.head, black, tl, false));
   const lensMat = new THREE.MeshStandardMaterial({ vertexColors: true, emissive: 0xffffff, emissiveIntensity: 1, color: 0x000000, roughness: 0.2 });
   // emissive colour comes from vertex colours through a small patch
   lensMat.onBeforeCompile = (sh) => {
@@ -180,11 +200,11 @@ export function buildProps(spots: PropSpot[], mats: WorldMaterials): PropsResult
   const bench = benchGeometry();
   const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.85 });
   const benches = by('bench');
-  group.add(instanced(bench.wood, wood, benches));
-  group.add(instanced(bench.metal, black, benches));
+  group.add(instanced(bench.wood, wood, benches, false));
+  group.add(instanced(bench.metal, black, benches, false));
   const binGeo = cyl(0.26, 0.28, 0.95, 14).translate(0, 0.475, 0);
   const binMat = new THREE.MeshStandardMaterial({ color: 0x1f3b2c, metalness: 0.5, roughness: 0.5 });
-  group.add(instanced(binGeo, binMat, by('bin')));
+  group.add(instanced(binGeo, binMat, by('bin'), false));
 
   // trees: split spots across variants and 160 m spatial cells, so frustum
   // culling (camera + sun shadow) and the distance cut-off can skip them
@@ -198,8 +218,11 @@ export function buildProps(spots: PropSpot[], mats: WorldMaterials): PropsResult
     c[(((i * 7 + Math.floor(s.x)) % variants.length) + variants.length) % variants.length].push(s);
   });
   const trees: THREE.InstancedMesh[] = [];
+  const treeCells: TreeCell[] = [];
   const depthMats = variants.map((v) => new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: v.leaf.map, alphaTest: 0.5 }));
-  for (const buckets of cells.values()) {
+  for (const [key, buckets] of cells) {
+    const [cx, cz] = key.split(',').map(Number);
+    const cell: TreeCell = { center: new THREE.Vector3((cx + 0.5) * 160, 0, (cz + 0.5) * 160), meshes: [] };
     variants.forEach((v, i) => {
       if (!buckets[i].length) return;
       const b = instanced(v.branches, v.bark, buckets[i], true);
@@ -207,7 +230,9 @@ export function buildProps(spots: PropSpot[], mats: WorldMaterials): PropsResult
       l.customDepthMaterial = depthMats[i];
       group.add(b, l);
       trees.push(b, l);
+      cell.meshes.push(b, l);
     });
+    treeCells.push(cell);
   }
   if (new URLSearchParams(location.search).has('stats')) {
     console.log('tree variants tris', variants.map((v) => [v.branches.index!.count / 3, v.leaves.index!.count / 3]), 'trees', treeSpots.length, 'cells', cells.size);
@@ -217,5 +242,5 @@ export function buildProps(spots: PropSpot[], mats: WorldMaterials): PropsResult
   const soil = new THREE.MeshStandardMaterial({ color: 0x2a2119, roughness: 1 });
   group.add(instanced(pitGeo, soil, treeSpots.filter((s) => s.y > 0.1), false));
 
-  return { group, lampHeads, trees };
+  return { group, lampHeads, trees, treeCells };
 }

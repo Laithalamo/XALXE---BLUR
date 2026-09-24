@@ -22,7 +22,7 @@ export class Hud {
         <div><kbd>W</kbd><kbd>S</kbd> throttle / brake-reverse</div>
         <div><kbd>A</kbd><kbd>D</kbd> steer &nbsp; <kbd>Space</kbd> handbrake</div>
         <div><kbd>Shift</kbd> test boost &nbsp; <kbd>R</kbd> reset car</div>
-        <div><kbd>C</kbd> camera &nbsp; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> graphics &nbsp; <kbd>H</kbd> hide help</div>
+        <div><kbd>C</kbd> camera &nbsp; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> graphics &nbsp; <kbd>F</kbd> auto-res &nbsp; <kbd>H</kbd> hide help</div>
       </div>
       <div class="hud-speed">
         <div class="v">0</div><div class="u">KM/H</div>
@@ -47,14 +47,16 @@ export class Hud {
     this.toastTimer = 1.6;
   }
 
-  update(dt: number, v: Vehicle, quality: Quality, trackName: string, drawCalls: number) {
+  update(dt: number, v: Vehicle, quality: Quality, trackName: string, drawCalls: number, scale = 1, autoRes = true) {
     this.fpsAcc += dt;
     this.fpsFrames++;
     if (this.fpsAcc > 0.5) {
       this.fps = this.fpsFrames / this.fpsAcc;
       this.fpsAcc = 0;
       this.fpsFrames = 0;
-      this.top.innerHTML = `<b>${trackName.toUpperCase()}</b> &nbsp;·&nbsp; ${Math.round(this.fps)} FPS &nbsp;·&nbsp; ${quality.toUpperCase()} &nbsp;·&nbsp; ${drawCalls} draws`;
+      const ms = (1000 / Math.max(1, this.fps)).toFixed(1);
+      const res = `${Math.round(scale * 100)}%${autoRes ? ' AUTO' : ''}`;
+      this.top.innerHTML = `<b>${trackName.toUpperCase()}</b> &nbsp;·&nbsp; <b>${Math.round(this.fps)} FPS</b> (${ms} ms) &nbsp;·&nbsp; ${quality.toUpperCase()} &nbsp;·&nbsp; RES ${res} &nbsp;·&nbsp; ${drawCalls} draws`;
     }
     this.speed.textContent = String(Math.round(Math.abs(v.speed) * 3.6));
     this.gear.textContent = v.gear === 0 ? 'R' : String(v.gear);

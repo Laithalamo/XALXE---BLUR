@@ -36,17 +36,20 @@ Friends just open that second address in Chrome or Edge. No install needed.
 | **R** | Reset car onto the road |
 | **C** | Change camera (chase, far, hood, bumper) |
 | **1 / 2 / 3** | Graphics: Low / Medium / High |
+| **F** | Auto resolution on/off |
 | **H** | Hide the help box |
 
 Gamepads work too (RT/LT throttle/brake, left stick steer, A handbrake, Y reset).
 
 ## Graphics settings
 
-- **High** — 4K sun shadows, full-res ambient occlusion, MSAA + SMAA, motion blur, all trees.
-- **Medium** — 2K shadows, half-res AO, SMAA, motion blur.
-- **Low** — 1K shadows, no AO, no motion blur, fewer trees, 85% resolution.
+- **High** — live car reflections, MSAA + SMAA, AO, motion blur, all trees.
+- **Medium** (default) — AO, SMAA, motion blur, most trees.
+- **Low** (default on laptops with built-in graphics) — no AO/motion blur, simpler windows, fewer trees.
 
-The FPS counter is in the top-left corner.
+**Auto resolution** (on by default, toggle with **F**) lowers the render resolution
+a little whenever the frame rate drops below ~56 FPS, and raises it again when
+there is headroom. The top-left shows FPS, frame time and the current resolution.
 
 ## For developers
 

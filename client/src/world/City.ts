@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { TrackDef } from '@shared/track/trackDefs';
 import type { Centerline } from '@shared/track/centerline';
 import { rng as makeRng, type Rng } from '@shared/math';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GeoBuilder } from './geom';
 import type { WorldMaterials } from './materials';
 import type { GraphicsPreset } from '../core/Settings';
@@ -214,6 +215,24 @@ export function buildCity(def: TrackDef, cl: Centerline, mats: WorldMaterials, f
     }
   }
 
+  const addMerged = (parts: [GeoBuilder, number][], m: THREE.Material, cast: boolean, name: string) => {
+    const geos = parts.filter(([b]) => b.vertexCount).map(([b, hex]) => {
+      const g = b.build();
+      const col = new THREE.Color(hex);
+      const n = g.getAttribute('position').count;
+      const arr = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) arr.set([col.r, col.g, col.b], i * 3);
+      g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+      return g;
+    });
+    if (!geos.length) return;
+    const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos);
+    const mesh = new THREE.Mesh(merged, m);
+    mesh.castShadow = cast;
+    mesh.receiveShadow = true;
+    mesh.name = name;
+    group.add(mesh);
+  };
   for (const [key, c] of chunks) {
     const add = (b: GeoBuilder, m: THREE.Material, cast: boolean, name: string) => {
       if (!b.vertexCount) return;
@@ -224,27 +243,14 @@ export function buildCity(def: TrackDef, cl: Centerline, mats: WorldMaterials, f
       group.add(mesh);
     };
     add(c.facade, facade, true, 'facade');
-    add(c.roof, mats.roof, false, 'roof');
-    add(c.roofProps, roofPropMaterial(mats), true, 'roofprops');
-    add(c.wood, woodMaterial(), true, 'watertank');
-    add(c.pavers, mats.pavers, false, 'pavers');
-    add(c.curb, mats.curb, false, 'curb');
+    // fewer draw calls: roofs + rooftop kit + water tanks share one mesh (tinted by vertex colour),
+    // and so do sidewalk pavers + kerbs
+    addMerged([[c.roof, 0x5e5c58], [c.roofProps, 0x7a7a78], [c.wood, 0x5a4331]], mats.roof, true, `roof-${key}`);
+    addMerged([[c.pavers, 0xffffff], [c.curb, 0xe4e1da]], mats.pavers, false, `pavers-${key}`);
     add(c.grass, mats.grass, false, 'grass');
   }
 
   return { group, props, trackDist };
-}
-
-let _roofProp: THREE.MeshStandardMaterial | null = null;
-function roofPropMaterial(mats: WorldMaterials) {
-  _roofProp ??= new THREE.MeshStandardMaterial({ map: mats.concrete.map, normalMap: mats.concrete.normalMap, color: 0x7a7a78, roughness: 0.7, metalness: 0.25 });
-  return _roofProp;
-}
-
-let _wood: THREE.MeshStandardMaterial | null = null;
-function woodMaterial() {
-  _wood ??= new THREE.MeshStandardMaterial({ color: 0x5a4331, roughness: 0.9 });
-  return _wood;
 }
 
 interface Rect { x0: number; z0: number; x1: number; z1: number }

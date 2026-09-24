@@ -117,6 +117,8 @@ const MAP = /* glsl */ `
   vec2 f = vFac;
   bool isWall = Nw.y < 0.5;
   vec2 fw = max(fwidth(f), vec2(0.0005)) * 0.75;
+  float camDist = length(vWPos - cameraPosition);
+  bool nearN = camDist < 150.0;
   vec2 dfx = dFdx(f), dfy = dFdy(f); // taken in uniform control flow for textureGrad below
 
   // wall material
@@ -125,19 +127,19 @@ const MAP = /* glsl */ `
   if (style < 0.5) {
     vec4 c = texture2D(uConc, f / 3.0);
     wallAlb = c.rgb * vec3(0.75, 0.76, 0.78);
-    wn = texture2D(uConcN, f / 3.0).xyz * 2.0 - 1.0;
+    if (nearN) wn = texture2D(uConcN, f / 3.0).xyz * 2.0 - 1.0;
     fWallRough = 0.55;
   } else if (style < 1.5) {
     wallAlb = texture2D(uConc, f / 2.5).rgb * vTint * 1.35;
-    wn = texture2D(uConcN, f / 2.5).xyz * 2.0 - 1.0;
+    if (nearN) wn = texture2D(uConcN, f / 2.5).xyz * 2.0 - 1.0;
     fWallRough = 0.8;
   } else if (style < 2.5) {
     wallAlb = texture2D(uBrick, f / 1.6).rgb * vTint;
-    wn = texture2D(uBrickN, f / 1.6).xyz * 2.0 - 1.0;
+    if (nearN) wn = texture2D(uBrickN, f / 1.6).xyz * 2.0 - 1.0;
     fWallRough = 0.9;
   } else {
     wallAlb = texture2D(uPlaster, f / 3.0).rgb * vTint * 1.25;
-    wn = texture2D(uPlasterN, f / 3.0).xyz * 2.0 - 1.0;
+    if (nearN) wn = texture2D(uPlasterN, f / 3.0).xyz * 2.0 - 1.0;
     fWallRough = 0.88;
   }
   // weathering: rain streaks, grime near the ground
@@ -208,7 +210,20 @@ const MAP = /* glsl */ `
     fRecess = inWin * (0.55 * smoothstep(0.35, 0.0, dTop) + 0.25 * smoothstep(0.2, 0.0, dSide));
     if (inGlass > 0.001) {
       vec2 csz = ground ? vec2(bay, groundH) : vec2(bay, floorH);
-      fInterior = roomColor(vec2(cx, cy), csz, vec2(bx, floorIdx) + seed * 11.0, seed, Tw, Nw);
+      #ifdef FACADE_SIMPLE
+      bool detailed = false;
+      #else
+      bool detailed = camDist < 240.0;
+      #endif
+      if (detailed) {
+        fInterior = roomColor(vec2(cx, cy), csz, vec2(bx, floorIdx) + seed * 11.0, seed, Tw, Nw);
+      } else {
+        // cheap far-away / low-quality window: dim room, lit at night by chance
+        float rr = hash12((vec2(bx, floorIdx) + seed * 11.0) * 1.37 + seed * 3.1);
+        float litF = step(rr, vWall.w);
+        fInterior = ground ? vec3(0.35, 0.3, 0.24) * mix(0.55, 1.6, uNight)
+                           : mix(vec3(0.045, 0.042, 0.04), vec3(1.25, 1.05, 0.75) * litF, uNight);
+      }
       // blinds on some windows
       float bl = hash12(vec2(bx * 3.1, floorIdx * 7.3) + seed);
       if (!ground && bl > 0.9) {

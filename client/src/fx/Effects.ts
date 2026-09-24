@@ -92,8 +92,13 @@ class SkidMarks {
     this.alpha.set([a, a, a, a], i * 4);
     this.along[wheel] += d;
     this.uvs.set([0, 0, 1, 0, 0, 1, 1, 1], i * 8);
+    // upload only this quad (the whole ring buffer is ~450 KB)
     const g = this.mesh.geometry;
-    for (const name of ['position', 'aAlpha', 'uv']) (g.getAttribute(name) as THREE.BufferAttribute).needsUpdate = true;
+    for (const [name, size] of [['position', 3], ['aAlpha', 1], ['uv', 2]] as const) {
+      const attr = g.getAttribute(name) as THREE.BufferAttribute;
+      attr.addUpdateRange(i * 4 * size, 4 * size);
+      attr.needsUpdate = true;
+    }
     last.copy(p);
     ls.copy(side);
   }
@@ -104,7 +109,9 @@ class SkidMarks {
 
   clear() {
     this.alpha.fill(0);
-    (this.mesh.geometry.getAttribute('aAlpha') as THREE.BufferAttribute).needsUpdate = true;
+    const a = this.mesh.geometry.getAttribute('aAlpha') as THREE.BufferAttribute;
+    a.clearUpdateRanges();
+    a.needsUpdate = true;
     this.last = [null, null, null, null];
   }
 }

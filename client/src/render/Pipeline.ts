@@ -44,6 +44,8 @@ export class Pipeline {
   private preset!: GraphicsPreset;
   private look!: LookParams;
   speedFx = 0; // 0..1, drives chromatic aberration at speed
+  /** dynamic resolution factor (auto resolution), 0.5..1 */
+  scale = 1;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -69,7 +71,7 @@ export class Pipeline {
     this.look = look;
     this.composer?.dispose();
     const r = this.renderer;
-    r.setPixelRatio(Math.min(devicePixelRatio, preset.pixelRatio) * preset.renderScale);
+    r.setPixelRatio(Math.min(devicePixelRatio, preset.pixelRatio) * preset.renderScale * this.scale);
     r.toneMappingExposure = look.exposure;
 
     const composer = new EffectComposer(r, {
@@ -87,7 +89,11 @@ export class Pipeline {
       ao.configuration.intensity = 2.2;
       ao.configuration.halfRes = preset.aoHalfRes;
       ao.configuration.gammaCorrection = false;
-      ao.setQualityMode(preset.aoHalfRes ? 'Medium' : 'High');
+      // N8AO otherwise auto-detects transparent materials and then re-renders the
+      // scene (and its shadow maps) twice more every frame. Glass/smoke don't need it.
+      (ao as unknown as { autoDetectTransparency: boolean }).autoDetectTransparency = false;
+      ao.configuration.transparencyAware = false;
+      ao.setQualityMode(preset.aoQuality);
       composer.addPass(ao);
       this.ao = ao;
     }
@@ -110,6 +116,32 @@ export class Pipeline {
     composer.addPass(new EffectPass(camera, ...effects));
     if (preset.smaa) composer.addPass(new EffectPass(camera, new SMAAEffect({ preset: SMAAPreset.HIGH })));
     this.composer = composer;
+    this.resize();
+    if (new URLSearchParams(location.search).has('profile')) this.instrument();
+  }
+
+  /** ?profile : time each post pass (and the scene/shadow render) with gl.finish */
+  readonly profile: Record<string, number> = {};
+  profileOn = false;
+  private instrument() {
+    const gl = this.renderer.getContext();
+    for (const pass of this.composer.passes) {
+      const name = pass.name + (pass instanceof EffectPass ? `(${(pass as unknown as { effects: { name: string }[] }).effects.map((e) => e.name).join('+')})` : '');
+      const orig = pass.render.bind(pass);
+      pass.render = (...args: Parameters<typeof orig>) => {
+        gl.finish();
+        const t0 = performance.now();
+        orig(...args);
+        gl.finish();
+        if (this.profileOn) this.profile[name] = (this.profile[name] ?? 0) + performance.now() - t0;
+      };
+    }
+  }
+
+  setScale(scale: number) {
+    this.scale = scale;
+    const p = this.preset;
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, p.pixelRatio) * p.renderScale * scale);
     this.resize();
   }
 
