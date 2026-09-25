@@ -7,14 +7,15 @@
   "workspaces": [
     "client",
     "server",
-    "shared"
+    "shared",
+    "mimoza"
   ],
   "scripts": {
     "prestart": "npm install --no-audit --no-fund --loglevel=error",
     "start": "npm run build && npm run start -w server",
     "dev": "npm run dev -w client",
-    "build": "npm run build -w client",
-    "typecheck": "npm run typecheck -w client && npm run typecheck -w server",
+    "build": "npm run build -w client && npm run build -w mimoza",
+    "typecheck": "npm run typecheck -w client && npm run typecheck -w server && npm run typecheck -w mimoza",
     "textures": "python3 tools/textures/generate.py assets/textures"
   },
   "engines": {

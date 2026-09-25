@@ -7,6 +7,8 @@ weapon power-ups. Private game for friends on the same home WiFi.
 > health and wrecks, start lights, positions, lap times, mini map, turn warnings, drift score.
 > Eight cars. **Online races with friends** (browser, up to 8 cars): see [ONLINE.md](ONLINE.md).
 > Next: more tracks, menus, profiles, sound.
+>
+> Also in this repo: **Mimoza**, the building's aidat / expense accounts at valve.ist/mimoza: see [MIMOZA.md](MIMOZA.md).
 
 ## Run it (host PC)
 

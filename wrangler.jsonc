@@ -8,7 +8,10 @@
   // plus xalxe.<account>.workers.dev
   "routes": [
     { "pattern": "valve.ist/blr", "zone_name": "valve.ist" },
-    { "pattern": "valve.ist/blr/*", "zone_name": "valve.ist" }
+    { "pattern": "valve.ist/blr/*", "zone_name": "valve.ist" },
+    // the building accounts app (see worker/src/mimoza.ts)
+    { "pattern": "valve.ist/mimoza", "zone_name": "valve.ist" },
+    { "pattern": "valve.ist/mimoza/*", "zone_name": "valve.ist" }
   ],
   "workers_dev": true,
   "assets": {
@@ -17,6 +20,8 @@
     // every request goes through the worker first, so the optional password covers the whole site
     "run_worker_first": true
   },
+  // Mimoza's data (aidat, payments, expenses...). The admin password lives only in here, hashed.
+  "d1_databases": [{ "binding": "MIMOZA_DB", "database_name": "mimoza", "database_id": "01c84ada-972c-436a-9c63-87f3659c26d2" }],
   "durable_objects": {
     "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
   },

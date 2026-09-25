@@ -1,15 +1,18 @@
 /**
  * XALXE on Cloudflare: serves the built game (static assets) and runs the online rooms,
  * one Durable Object per room code. Optional password: set the SITE_PASSWORD secret.
+ * Also hosts the Mimoza building accounts app under /mimoza (see mimoza.ts).
  * Deploy: see ONLINE.md.
  */
 import { DurableObject } from 'cloudflare:workers';
 import { RoomCore } from '../../shared/src/net/room';
 import { ROOM_CODE, type PlayerInfo } from '../../shared/src/net/protocol';
+import { mimoza } from './mimoza';
 
 interface Env {
   ASSETS: { fetch(req: Request): Promise<Response> };
   ROOMS: DurableObjectNamespace<Room>;
+  MIMOZA_DB?: D1Database;
   SITE_PASSWORD?: string;
 }
 
@@ -82,6 +85,8 @@ const PREFIX = '/blr';
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
+    // the building accounts app (valve.ist/mimoza): public to read, its own sign-in to edit
+    if (url.pathname === '/mimoza' || url.pathname.startsWith('/mimoza/')) return mimoza(req, env, url);
     // relative links need the trailing slash
     if (url.pathname === PREFIX) return Response.redirect(`${url.origin}${PREFIX}/${url.search}`, 301);
     const base = url.pathname.startsWith(PREFIX + '/') ? PREFIX : '';
