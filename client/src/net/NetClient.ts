@@ -2,7 +2,7 @@ import type { ClientMsg, PlayerInfo, ServerMsg } from '@shared/net/protocol';
 
 /**
  * WebSocket connection to a room (Cloudflare Durable Object online, or the home server on the
- * WiFi — same address scheme: /room/CODE). Keeps a server clock estimate from pings, so every
+ * WiFi — same address scheme: room/CODE next to the page). Keeps a server clock estimate from pings, so every
  * browser agrees on when the race starts and how old a car state is.
  */
 export class NetClient {
@@ -31,9 +31,11 @@ export class NetClient {
   }
 
   connect(name: string, car: string, paint: number): Promise<void> {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const q = new URLSearchParams({ name, car, paint: String(paint) });
-    const ws = new WebSocket(`${proto}//${location.host}/room/${this.code}?${q}`);
+    // next to the page, so it also works when the game lives under a path (valve.ist/blr/room/CODE)
+    const url = new URL(`room/${this.code}?${q}`, location.href);
+    url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(url);
     this.ws = ws;
     return new Promise((resolve, reject) => {
       let settled = false;

@@ -4,6 +4,13 @@
   "name": "xalxe",
   "main": "worker/src/index.ts",
   "compatibility_date": "2026-05-01",
+  // the game at valve.ist/blr/ (these paths only: the rest of valve.ist stays your own site),
+  // plus xalxe.<account>.workers.dev
+  "routes": [
+    { "pattern": "valve.ist/blr", "zone_name": "valve.ist" },
+    { "pattern": "valve.ist/blr/*", "zone_name": "valve.ist" }
+  ],
+  "workers_dev": true,
   "assets": {
     "directory": "./client/dist",
     "binding": "ASSETS",

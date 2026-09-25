@@ -14,10 +14,12 @@ One-time setup, about 10 minutes. After that, every push to GitHub updates the s
    - **Deploy command:** `npx wrangler deploy`
 4. **Deploy**. The first build takes a few minutes.
 
-## 2. Use your domain
+## 2. Your address
 
-Worker `xalxe` → **Settings** → **Domains & Routes** → **Add** → **Custom domain** → `valve.ist`
-(or `race.valve.ist` if the main domain already has a website). Cloudflare adds the DNS record.
+Nothing to do: the deploy adds the routes from `wrangler.jsonc`, so the game is at
+**https://valve.ist/blr** (only that path: the rest of valve.ist stays your own site) and at
+`https://xalxe.<your-account>.workers.dev`. For another path, change `PREFIX` in
+`worker/src/index.ts` and the two `routes` in `wrangler.jsonc`.
 
 ## 3. Password (recommended)
 

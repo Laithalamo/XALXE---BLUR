@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
+  // relative URLs: the same build works at the site root and under a path (valve.ist/blr/)
+  base: './',
   publicDir: '../assets',
   resolve: {
     alias: { '@shared': fileURLToPath(new URL('../shared/src', import.meta.url)) },

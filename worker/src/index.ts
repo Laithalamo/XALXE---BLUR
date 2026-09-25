@@ -71,37 +71,54 @@ form{background:#15171c;border:1px solid #2a2d34;border-radius:14px;padding:28px
 h1{margin:0 0 18px;font-size:30px;letter-spacing:.2em}input{width:100%;box-sizing:border-box;padding:12px;border-radius:8px;border:1px solid #3a3e46;background:#0b0c10;color:#fff;font-size:16px}
 button{margin-top:14px;width:100%;padding:12px;border:0;border-radius:8px;background:#e8202a;color:#fff;font-weight:700;font-size:16px;letter-spacing:.1em;cursor:pointer}
 p{color:#ff6b6b;margin:10px 0 0;font-size:14px}</style></head><body>
-<form method="post" action="/login?back=${encodeURIComponent(back)}"><h1>XALXE</h1><input type="password" name="password" placeholder="Password" autofocus>
+<form method="post" action="login?back=${encodeURIComponent(back)}"><h1>XALXE</h1><input type="password" name="password" placeholder="Password" autofocus>
 <button>PLAY</button>${wrong ? '<p>Wrong password</p>' : ''}</form></body></html>`;
   return new Response(html, { status: wrong ? 401 : 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
 }
 
+/** the game also lives under this path on the main domain (valve.ist/blr/), see wrangler.jsonc routes */
+const PREFIX = '/blr';
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
+    // relative links need the trailing slash
+    if (url.pathname === PREFIX) return Response.redirect(`${url.origin}${PREFIX}/${url.search}`, 301);
+    const base = url.pathname.startsWith(PREFIX + '/') ? PREFIX : '';
+    const path = url.pathname.slice(base.length);
     if (env.SITE_PASSWORD) {
       const key = await keyFor(env.SITE_PASSWORD);
-      if (url.pathname === '/login' && req.method === 'POST') {
+      if (path === '/login' && req.method === 'POST') {
         const form = await req.formData();
-        if (String(form.get('password') ?? '') !== env.SITE_PASSWORD) return loginPage(true, url.searchParams.get('back') ?? '/');
-        const back = url.searchParams.get('back') ?? '/';
+        const home = base + '/';
+        if (String(form.get('password') ?? '') !== env.SITE_PASSWORD) return loginPage(true, url.searchParams.get('back') ?? home);
+        const back = url.searchParams.get('back') ?? home;
         return new Response(null, {
           status: 303,
-          headers: { location: back.startsWith('/') && !back.startsWith('//') ? back : '/', 'set-cookie': `${COOKIE}=${key}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax` },
+          headers: { location: back.startsWith('/') && !back.startsWith('//') ? back : home, 'set-cookie': `${COOKIE}=${key}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax` },
         });
       }
       const cookie = req.headers.get('cookie') ?? '';
       if (!cookie.split(/;\s*/).includes(`${COOKIE}=${key}`)) {
         // the page itself shows the password form (and returns to the same link, room code included)
-        if (url.pathname === '/' || url.pathname === '/index.html') return loginPage(false, url.pathname + url.search);
+        if (path === '/' || path === '/index.html') return loginPage(false, url.pathname + url.search);
         return new Response('login first', { status: 401 });
       }
     }
-    const m = url.pathname.match(/^\/room\/([A-Z0-9]+)$/);
+    const m = path.match(/^\/room\/([A-Z0-9]+)$/);
     if (m) {
       if (!ROOM_CODE.test(m[1])) return new Response('bad room code', { status: 400 });
       return env.ROOMS.get(env.ROOMS.idFromName(m[1])).fetch(req);
     }
-    return env.ASSETS.fetch(req);
+    if (!base) return env.ASSETS.fetch(req);
+    // the files are stored at the root: drop the prefix, and put it back on redirects
+    const res = await env.ASSETS.fetch(new Request(new URL(path + url.search, url), req));
+    const loc = res.headers.get('location');
+    if (loc?.startsWith('/') && !loc.startsWith('//')) {
+      const out = new Response(res.body, res);
+      out.headers.set('location', base + loc);
+      return out;
+    }
+    return res;
   },
 };
