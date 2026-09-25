@@ -48,16 +48,32 @@ export const PRESETS: Record<Quality, GraphicsPreset> = {
 const KEY = 'xalxe.quality';
 const AUTO_RES_KEY = 'xalxe.autores';
 
+let gpu: string | null = null;
+
+/** the graphics card the browser draws with ('' if it won't say) */
+export function gpuName() {
+  if (gpu === null) {
+    gpu = '';
+    try {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      const ext = gl?.getExtension('WEBGL_debug_renderer_info');
+      gpu = ext && gl ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+      gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    } catch {
+      /* ignore */
+    }
+  }
+  return gpu;
+}
+
+/** the browser draws on the CPU (hardware acceleration off, or no working graphics driver) */
+export function softwareRendering() {
+  return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(gpuName());
+}
+
 /** Integrated / mobile GPUs start on Low, everything else on Medium. */
 function detectQuality(): Quality {
-  try {
-    const gl = document.createElement('canvas').getContext('webgl2');
-    const ext = gl?.getExtension('WEBGL_debug_renderer_info');
-    const name = ext && gl ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
-    if (/intel|uhd|iris|mali|adreno|powervr|apple m\d|radeon\(tm\) graphics|vega \d+ graphics|swiftshader/i.test(name)) return 'low';
-  } catch {
-    /* ignore */
-  }
+  if (/intel|uhd|iris|mali|adreno|powervr|apple m\d|radeon\(tm\) graphics|vega \d+ graphics|swiftshader|llvmpipe|software|basic render/i.test(gpuName())) return 'low';
   return 'medium';
 }
 

@@ -16,7 +16,7 @@ import { clamp, rng } from '@shared/math';
 import { Assets } from '../core/Assets';
 import { Input } from '../core/Input';
 import {
-  PRESETS, loadQuality, saveQuality, loadAutoRes, saveAutoRes, loadResScale, saveResScale, loadDifficulty, saveDifficulty, loadCar, saveCar, loadName, saveName,
+  PRESETS, loadQuality, saveQuality, loadAutoRes, saveAutoRes, loadResScale, saveResScale, softwareRendering, loadDifficulty, saveDifficulty, loadCar, saveCar, loadName, saveName,
   type Quality, type AIDifficulty,
 } from '../core/Settings';
 import { Pipeline } from '../render/Pipeline';
@@ -267,6 +267,9 @@ export class Game {
     if (warp > 0) this.warp(warp);
     if (this.params.has('demo')) this.combatDemo();
     progress(1, 'ready');
+    if (softwareRendering() && !this.shotMode) {
+      this.hud.toast('SLOW: HARDWARE ACCELERATION IS OFF IN THIS BROWSER', 12);
+    }
   }
 
   /** ?demo: fill the screen with combat effects (for checking the visuals in screenshots) */

@@ -40,7 +40,7 @@ body { font-family: 'Rajdhani', 'Segoe UI', sans-serif; color: var(--ink); user-
   font-size: 14px; line-height: 1.55; letter-spacing: 0.05em;
 }
 .hud-help kbd { display: inline-block; min-width: 22px; padding: 0 5px; margin-right: 6px; border: 1px solid #555a62; border-radius: 3px; text-align: center; font-family: inherit; font-size: 12px; color: var(--ink); }
-.hud-toast { position: absolute; left: 50%; top: 16%; transform: translateX(-50%); font-size: 26px; font-weight: 700; letter-spacing: 0.14em; opacity: 0; transition: opacity 0.3s; text-shadow: 0 2px 14px rgba(0,0,0,0.7); }
+.hud-toast { position: absolute; left: 50%; top: 16%; transform: translateX(-50%); width: max-content; max-width: 90%; text-align: center; font-size: 26px; font-weight: 700; letter-spacing: 0.14em; opacity: 0; transition: opacity 0.3s; text-shadow: 0 2px 14px rgba(0,0,0,0.7); }
 .hud-toast.show { opacity: 1; }
 .shot .hud-help, .shot .hud-top { display: none; }
 
