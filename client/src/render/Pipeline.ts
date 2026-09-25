@@ -30,6 +30,19 @@ THREE.ShaderChunk.shadowmap_pars_fragment = THREE.ShaderChunk.shadowmap_pars_fra
   'float phi = 0.785;',
 );
 
+// three.js hands each shadow caster's colour map to one shared depth material, and when that
+// material's shader is picked again mid-frame (after an instanced mesh) the current caster's map
+// decides which variant gets built: a new one whenever the draw order happens to change, i.e. a
+// freeze mid-race. Opaque casters don't use the map in the shadow pass, so drop it: the few
+// variants left are all built while loading. Alpha-tested casters (leaves, fences) keep it.
+THREE.Object3D.prototype.onBeforeShadow = function (_r, _s, _c, _sc, _g, depthMaterial) {
+  const m = depthMaterial as THREE.MeshDepthMaterial;
+  if (!(m.alphaTest > 0) && !m.alphaHash) {
+    m.map = null;
+    m.alphaMap = null;
+  }
+};
+
 /** Renderer + post-processing chain: AO -> motion blur -> bloom/tonemap/grade -> SMAA. */
 export class Pipeline {
   readonly renderer: THREE.WebGLRenderer;
