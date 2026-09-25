@@ -16,7 +16,7 @@ import { clamp, rng } from '@shared/math';
 import { Assets } from '../core/Assets';
 import { Input } from '../core/Input';
 import {
-  PRESETS, loadQuality, saveQuality, loadAutoRes, saveAutoRes, loadDifficulty, saveDifficulty, loadCar, saveCar, loadName, saveName,
+  PRESETS, loadQuality, saveQuality, loadAutoRes, saveAutoRes, loadResScale, saveResScale, loadDifficulty, saveDifficulty, loadCar, saveCar, loadName, saveName,
   type Quality, type AIDifficulty,
 } from '../core/Settings';
 import { Pipeline } from '../render/Pipeline';
@@ -84,11 +84,16 @@ export class Game {
   private treeCells: TreeCell[] = [];
   // auto resolution: keeps the frame rate up by lowering render resolution
   private autoRes = loadAutoRes();
-  private resFrames = 0;
+  private resDts: number[] = [];
   private resTime = 0;
   private goodSecs = 0;
   private badSecs = 0;
   private upBlockedUntil = 0;
+  private upBackoff = 20;
+  private lastUpAt = -1e9;
+  private lastScaleChange = 0;
+  private resGraceUntil = 3;
+  private savedScale = 1;
   private clock = 0;
   private def: TrackDef = TRACKS.midtown;
   private cl!: Centerline;
@@ -236,6 +241,7 @@ export class Game {
     this.hud.mapSlot.appendChild(this.minimap.el);
 
     this.camera.far = preset.drawDistance;
+    if (this.autoRes) this.pipeline.scale = this.savedScale = loadResScale(this.quality);
     this.pipeline.build(this.scene, this.camera, preset, theme.look);
     this.trackBlur();
     addEventListener('resize', () => this.pipeline.requestResize());
@@ -253,6 +259,7 @@ export class Game {
     // a couple of hidden frames so post-processing and shadow shaders are warm: no hitching later
     progress(0.92, 'preparing shaders');
     await this.pipeline.renderer.compileAsync(this.scene, this.camera);
+    this.warmUpGpu();
     this.chase.update(1 / 60, this.player.pos, this.player.quat, new THREE.Vector3(), 0);
     for (let i = 0; i < 2; i++) this.pipeline.render(1 / 60, 0);
     this.pipeline.motionBlur.resetHistory();
@@ -974,35 +981,58 @@ export class Game {
   }
 
   /**
-   * Auto resolution: measure the real frame rate every second. Below ~56 FPS the
-   * render resolution drops a step (down to 55%); after a long smooth stretch
-   * it tries one step back up, and stays lower for a while if that was too much.
+   * Auto resolution: measure the frame rate every second. Below ~56 FPS the render resolution
+   * drops a step (down to 55%); after a long smooth stretch it tries one step back up. Every
+   * change resizes all render targets, a small freeze on weak GPUs, so it changes as rarely as
+   * it can: single hitches don't count (the slowest 5% of frames are left out), nothing is
+   * measured right after loading or a change, a step up that fails waits twice as long before
+   * the next try, and a resolution that holds is remembered for the next race.
    */
   private updateAutoRes(dt: number) {
     this.clock += dt;
-    this.resFrames++;
+    if (this.clock < this.resGraceUntil) return;
+    this.resDts.push(dt);
     this.resTime += dt;
     if (this.resTime < 1) return;
-    const fps = this.resFrames / this.resTime;
-    this.resFrames = 0;
+    const d = this.resDts.sort((a, b) => a - b);
+    const n = Math.max(1, Math.floor(d.length * 0.95));
+    let sum = 0;
+    for (let k = 0; k < n; k++) sum += d[k];
+    const fps = n / sum;
+    this.resDts.length = 0;
     this.resTime = 0;
     const pl = this.pipeline;
-    // one slow second (a hitch, a GC pause) is not enough: need two in a row, unless it is really slow
     this.badSecs = fps < 55.5 ? this.badSecs + 1 : 0;
     if ((this.badSecs >= 2 || fps < 40) && pl.scale > 0.56) {
-      const next = Math.max(0.55, +(pl.scale - (fps < 40 ? 0.15 : 0.08)).toFixed(2));
-      pl.setScale(next);
-      this.goodSecs = 0;
-      this.badSecs = 0;
-      this.upBlockedUntil = this.clock + 20;
+      // dropping soon after a step up: that step was too much, wait twice as long next time
+      if (this.clock - this.lastUpAt < 12) this.upBackoff = Math.min(this.upBackoff * 2, 320);
+      this.changeScale(Math.max(0.55, +(pl.scale - (fps < 40 ? 0.15 : 0.08)).toFixed(2)));
+      this.upBlockedUntil = this.clock + this.upBackoff;
     } else if (fps >= 58) {
       this.goodSecs++;
       if (pl.scale < 1 && this.goodSecs >= 10 && this.clock > this.upBlockedUntil) {
-        pl.setScale(Math.min(1, +(pl.scale + 0.05).toFixed(2)));
-        this.goodSecs = 0;
+        this.changeScale(Math.min(1, +(pl.scale + 0.05).toFixed(2)));
+        this.lastUpAt = this.clock;
         this.upBlockedUntil = this.clock + 4;
       }
     } else this.goodSecs = 0;
+    // held for 30 s: remember it for the next race, and slowly forgive failed steps up
+    if (this.clock - this.lastScaleChange > 30 && this.savedScale !== pl.scale) {
+      this.savedScale = pl.scale;
+      saveResScale(this.quality, pl.scale);
+      this.upBackoff = Math.max(20, this.upBackoff / 2);
+    }
+  }
+
+  private changeScale(scale: number) {
+    this.pipeline.setScale(scale);
+    this.goodSecs = 0;
+    this.badSecs = 0;
+    this.lastScaleChange = this.clock;
+    // the resize itself costs a frame or two: don't count it
+    this.resGraceUntil = this.clock + 1.5;
+    this.resDts.length = 0;
+    this.resTime = 0;
   }
 
   private applyFacadeDetail(detail: 'low' | 'high') {
@@ -1032,6 +1062,13 @@ export class Game {
     const preset = PRESETS[q];
     this.env.setShadowQuality(preset.shadowMapSize, preset.shadowDistance);
     this.camera.far = preset.drawDistance;
+    if (this.autoRes) {
+      this.pipeline.scale = this.savedScale = loadResScale(q);
+      this.upBackoff = 20;
+      this.resGraceUntil = this.clock + 2;
+      this.resDts.length = 0;
+      this.resTime = 0;
+    }
     this.pipeline.build(this.scene, this.camera, preset, THEMES[this.def.theme].look);
     this.trackBlur();
     this.setReflections(preset.dynamicReflections);
@@ -1369,7 +1406,30 @@ export class Game {
     }
     this.chase.snap();
     await this.pipeline.renderer.compileAsync(this.scene, this.camera);
+    this.warmUpGpu();
     this.pipeline.motionBlur.resetHistory();
+    this.resGraceUntil = this.clock + 2;
+  }
+
+  /**
+   * Draw everything once while the loading screen is up, hidden things too (far-away car
+   * models, tree groups out of range, shields) and things behind the camera: their meshes,
+   * textures and shaders go to the GPU now. Otherwise each one is uploaded the first time it
+   * comes into view, and on weak PCs every upload is a small freeze during the first lap.
+   */
+  private warmUpGpu() {
+    const saved: [THREE.Object3D, boolean, boolean][] = [];
+    this.scene.traverse((o) => {
+      if ((o as THREE.Light).isLight) return;
+      saved.push([o, o.visible, o.frustumCulled]);
+      o.visible = true;
+      o.frustumCulled = false;
+    });
+    this.pipeline.render(1 / 60, 0);
+    for (const [o, visible, culled] of saved) {
+      o.visible = visible;
+      o.frustumCulled = culled;
+    }
   }
 
   /** online, once per frame: keep the race clock on the server's, send our cars */

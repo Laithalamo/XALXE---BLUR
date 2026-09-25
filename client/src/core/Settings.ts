@@ -90,6 +90,26 @@ export function loadAutoRes() {
   }
 }
 
+/** the auto resolution scale that last held steady, per quality (next race starts there) */
+const RES_SCALE_KEY = 'xalxe.resscale.';
+
+export function loadResScale(q: Quality) {
+  try {
+    const v = Number(localStorage.getItem(RES_SCALE_KEY + q));
+    return v >= 0.55 && v <= 1 ? v : 1;
+  } catch {
+    return 1;
+  }
+}
+
+export function saveResScale(q: Quality, scale: number) {
+  try {
+    localStorage.setItem(RES_SCALE_KEY + q, String(scale));
+  } catch {
+    /* storage blocked */
+  }
+}
+
 export function saveAutoRes(on: boolean) {
   try {
     localStorage.setItem(AUTO_RES_KEY, on ? 'on' : 'off');
